@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aadhaar QR Code Scanner</title>
+
+  <!--
+  ═══════════════════════════════════════════════════════════════════════
+  DEEP LOGIC DOCUMENTATION — AADHAAR QR SCANNER
+  ═══════════════════════════════════════════════════════════════════════
+
+  SOURCE PROJECT : AadharCardQrCodeScanner (Android SDK)
+  LANGUAGE       : Java (Android) → Ported to Vanilla JS / HTML5
+
+  ────────────────────────────────────────────────────────────────────
+  ALGORITHM OVERVIEW
+  ────────────────────────────────────────────────────────────────────
+
+  STEP 1 — CAMERA CAPTURE
+    The Android app uses Google Mobile Vision API (BarcodeCapture fragment)
+    configured with:
+      • Barcode.QR_CODE  → only accepts QR format
+      • setSupportMultipleScan(false) → stops after first successful scan
+      • setShowDrawRect(true)  → draws overlay rectangle on detected QR
+      • shouldAutoFocus(true)  → continuous autofocus
+      • setShowFlash(false)    → flash off by default
+    In HTML5, this is replaced by:
+      • navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      • HTML5 <video> element rendering the camera stream to a <canvas>
+      • ZXing-js (BrowserQRCodeReader) reading frames from the canvas
+
+  STEP 2 — QR RAW VALUE EXTRACTION
+    The QR barcode callback gives:
+      barcode.rawValue  → the raw string content of the QR code
+      barcode.displayValue → human-readable version
+    Aadhaar QR codes contain RAW XML (not JSON, not URL, not plain text).
+    Example raw value structure:
+      <?xml version="1.0" encoding="UTF-8"?>
+      <PrintLetterBarcodeData uid="XXXXXXXXXXXX"
+        name="FULL NAME"
+        gender="M"
+        yob="1990"
+        dob="01/01/1990"
+        co="S/O Father Name"
+        house="12"
+        street="Main Street"
+        lm="Near Temple"
+        loc="Locality Area"
+        vtc="Village/Town/City"
+        po="Post Office"
+        dist="District"
+        subdist="Sub District"
+        state="State"
+        pc="560001"
+        country="India" />
+
+  STEP 3 — XML PARSING (Core Algorithm)
+    Android uses:  org.json.XML.toJSONObject(rawValue)
+    This converts the XML string to a JSONObject where XML attributes
+    become JSON keys at the same level as the element name.
+
+    After conversion:
+      JSONObject root = XML.toJSONObject(rawValue);
+      JSONObject data = root.getJSONObject("PrintLetterBarcodeData");
+      // Now access:  data.getString("uid"), data.getString("name"), etc.
+
+    In HTML5, this is done with DOMParser:
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(rawValue, "text/xml");
+      const el = xmlDoc.querySelector("PrintLetterBarcodeData");
+      const uid = el.getAttribute("uid");
+
+    VALIDATION CHECKS (exact logic from AcqsActivity.java):
+      1. object.has("PrintLetterBarcodeData")  → root element must exist
+      2. printLetterBarcodeData.has("uid")     → uid attribute must exist
+      If either check fails → show "Invalid QR format" error and resume scanning
+
+  STEP 4 — DATA MODEL (UidModel.java — 17 fields)
+    Field name in XML     Android field name     Description
+    ─────────────────────────────────────────────────────────────────
+    uid                   AADHARNUMBER           12-digit Aadhaar number
+    name                  FULLNAME               Holder's full name
+    gender                GENDER                 M=Male, F=Female, T=Transgender
+    yob                   YEAROFBIRTH            Year of birth (YYYY)
+    dob                   DATEOFBIRTH            Full DOB (DD/MM/YYYY) if available
+    co                    CAREOF                 Care of (S/O, D/O, W/O, C/O)
+    house                 HOUSE                  House/flat number
+    street                STREET                 Street/road name
+    lm                    LANDMARK               Landmark near address
+    loc                   LOCALITY               Locality/area
+    vtc                   VILLAGETOWNCITY        Village, Town or City
+    po                    POSTOFFICE             Post office name
+    dist                  DISTRICT               District
+    subdist               SUBDISTRICT            Sub-district/Taluka/Mandal
+    state                 STATE                  State name
+    pc                    POSTALCODE             PIN code (6 digits)
+    country               COUNTRY                Country (usually "India")
+
+  STEP 5 — RESULT DELIVERY
+    Android: Intent.putExtra("result", uidModel) → parent Activity reads via
+             getParcelableExtra("result") — a Parcelable object passed between Activities.
+    HTML5:   Display result in a card UI directly on the same page.
+
+  ────────────────────────────────────────────────────────────────────
+  LIBRARIES / DEPENDENCIES
+  ────────────────────────────────────────────────────────────────────
+  Android (original):
+    • com.google.android.gms:play-services-vision → Google Mobile Vision
+    • xyz.belvi.mobilevisionbarcodescanner        → BarcodeCapture fragment wrapper
+    • org.json (java-json.jar)                    → XML.toJSONObject()
+
+  HTML5 (this port):
+    • @zxing/browser (CDN)   → ZXing JS QR decoder (Reed-Solomon algorithm)
+    • Native DOMParser API   → XML parsing (replaces org.json.XML)
+    • MediaDevices API       → Camera access (replaces Google Vision camera)
+
+  ────────────────────────────────────────────────────────────────────
+  QR CODE ENCODING ALGORITHM (How Aadhaar QR is generated by UIDAI)
+  ────────────────────────────────────────────────────────────────────
+  • Format        : QR Code Model 2 (ISO/IEC 18004)
+  • Error Correction: Level M (15% data recovery)
+  • Encoding mode : Byte mode (UTF-8 encoded XML string)
+  • Reed-Solomon  : Used for error correction within QR code blocks
+  • Data masking  : One of 8 mask patterns applied to improve readability
+  • Version       : Typically Version 15–25 depending on address length
+                    (each version adds 4 modules, supports more data)
+
+  ────────────────────────────────────────────────────────────────────
+  SCANNER UI FEATURES (replicated from original Android app)
+  ────────────────────────────────────────────────────────────────────
+  1. Animated scan frame overlay (corner brackets)
+  2. Scanning line animation (top-to-bottom sweep)
+  3. Flash/torch toggle (using ImageCapture API where supported)
+  4. Auto-focus mode display
+  5. Real-time QR detection with highlight
+  6. Result display with all 17 Aadhaar fields
+  7. "Scan Again" button to re-initiate scanning
+  8. Error handling for invalid QR formats
+  ═══════════════════════════════════════════════════════════════════════
+  -->
+
+  <!-- ZXing Browser QR Code Reader -->
+  <script src="https://unpkg.com/@zxing/browser@latest/umd/index.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #1a237e;
+      --accent: #ff6f00;
+      --success: #2e7d32;
+      --error: #c62828;
+      --bg: #f0f2f5;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --scan-color: #00e5ff;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: linear-gradient(135deg, #1a237e 0%, #283593 60%, #3949ab 100%);
+      color: white;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 2px 12px rgba(26,35,126,0.35);
+    }
+    .header-logo {
+      width: 46px; height: 46px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+    }
+    .header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.3px; }
+    .header p  { font-size: 0.75rem; opacity: 0.75; margin-top: 2px; }
+
+    /* ── Algorithm badge ── */
+    .algo-strip {
+      background: #e8eaf6;
+      border-left: 4px solid var(--primary);
+      padding: 10px 20px;
+      font-size: 0.78rem;
+      color: #283593;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
+    .algo-badge {
+      background: var(--primary); color: white;
+      border-radius: 4px; padding: 2px 8px; font-size: 0.72rem; font-weight: 600;
+    }
+
+    /* ── Main layout ── */
+    .container { max-width: 520px; margin: 0 auto; padding: 20px 16px 40px; }
+
+    /* ── Scanner card ── */
+    .scanner-card {
+      background: var(--card);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      margin-bottom: 20px;
+    }
+
+    /* ── Video viewport ── */
+    .viewport {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: #000;
+      overflow: hidden;
+    }
+    #video {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    #canvas { display: none; }
+
+    /* ── Overlay frame (corner brackets like Android app) ── */
+    .scan-overlay {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    .scan-frame {
+      width: 70%; aspect-ratio: 1;
+      position: relative;
+    }
+    .scan-frame::before, .scan-frame::after,
+    .scan-frame .corner-br, .scan-frame .corner-bl {
+      content: '';
+      position: absolute;
+      width: 32px; height: 32px;
+      border-color: var(--scan-color);
+      border-style: solid;
+    }
+    .scan-frame::before { top: 0; left: 0; border-width: 4px 0 0 4px; border-radius: 4px 0 0 4px; }
+    .scan-frame::after  { top: 0; right: 0; border-width: 4px 4px 0 0; border-radius: 0 4px 0 0; }
+    .scan-frame .corner-br { bottom: 0; right: 0; border-width: 0 4px 4px 0; border-radius: 0 0 4px 0; }
+    .scan-frame .corner-bl { bottom: 0; left: 0; border-width: 0 0 4px 4px; border-radius: 0 0 0 4px; }
+
+    /* ── Scanning line animation ── */
+    .scan-line {
+      position: absolute;
+      left: 4px; right: 4px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--scan-color), transparent);
+      top: 4px;
+      animation: scanLine 2s linear infinite;
+      box-shadow: 0 0 8px var(--scan-color);
+    }
+    @keyframes scanLine {
+      0%   { top: 4px; opacity: 1; }
+      95%  { top: calc(100% - 6px); opacity: 1; }
+      100% { top: calc(100% - 6px); opacity: 0; }
+    }
+
+    /* ── Dimmed overlay sides ── */
+    .dim-overlay {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 72% 72% at center,
+        transparent 0%, rgba(0,0,0,0.55) 100%);
+      pointer-events: none;
+    }
+
+    /* ── Status label on viewport ── */
+    .scan-label {
+      position: absolute;
+      bottom: 16px; left: 0; right: 0;
+      text-align: center;
+      color: rgba(255,255,255,0.9);
+      font-size: 0.8rem;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+
+    /* ── Controls bar ── */
+    .controls {
+      display: flex; gap: 0;
+      border-top: 1px solid var(--border);
+    }
+    .ctrl-btn {
+      flex: 1;
+      padding: 14px 8px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      font-size: 0.7rem; color: var(--muted);
+      font-weight: 500;
+      transition: background 0.15s, color 0.15s;
+    }
+    .ctrl-btn:hover { background: #f3f4f6; color: var(--primary); }
+    .ctrl-btn.active { color: var(--accent); }
+    .ctrl-btn svg { width: 22px; height: 22px; }
+    .ctrl-divider { width: 1px; background: var(--border); margin: 10px 0; }
+
+    /* ── Start button ── */
+    .start-area { padding: 20px 20px 20px; }
+    .btn-start {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #1a237e, #3949ab);
+      color: white;
+      border: none; border-radius: 12px;
+      font-size: 1rem; font-weight: 600;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      transition: transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 4px 14px rgba(26,35,126,0.35);
+    }
+    .btn-start:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(26,35,126,0.45); }
+    .btn-start:active { transform: translateY(0); }
+    .btn-start:disabled { background: #9ca3af; box-shadow: none; cursor: not-allowed; transform: none; }
+
+    /* ── Error / status messages ── */
+    .msg {
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      display: none;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .msg.show { display: flex; }
+    .msg.error { background: #fef2f2; border: 1px solid #fca5a5; color: var(--error); }
+    .msg.info  { background: #eff6ff; border: 1px solid #93c5fd; color: #1e40af; }
+    .msg svg   { flex-shrink: 0; width: 18px; height: 18px; margin-top: 1px; }
+
+    /* ── Result card ── */
+    .result-card {
+      background: var(--card);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      display: none;
+      animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .result-card.show { display: block; }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-header {
+      background: linear-gradient(135deg, #2e7d32, #43a047);
+      color: white; padding: 20px;
+      display: flex; align-items: center; gap: 14px;
+    }
+    .result-icon {
+      width: 48px; height: 48px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+    }
+    .result-header h2 { font-size: 1.1rem; font-weight: 700; }
+    .result-header p  { font-size: 0.8rem; opacity: 0.85; margin-top: 3px; }
+
+    /* ── Aadhaar number display ── */
+    .aadhaar-num {
+      background: #f8f9ff;
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .aadhaar-num label { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; }
+    .aadhaar-digits {
+      font-size: 1.3rem; font-weight: 700; letter-spacing: 4px;
+      color: var(--primary); font-family: 'Courier New', monospace;
+      margin-top: 4px;
+    }
+    .uid-mask { color: var(--muted); }
+
+    /* ── Field sections ── */
+    .section { padding: 0 20px; }
+    .section-title {
+      font-size: 0.7rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--primary);
+      padding: 16px 0 10px;
+      border-bottom: 2px solid #e8eaf6;
+      margin-bottom: 4px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-title svg { width: 16px; height: 16px; }
+
+    .field-row {
+      display: flex;
+      padding: 9px 0;
+      border-bottom: 1px solid #f3f4f6;
+      gap: 12px;
+    }
+    .field-row:last-child { border-bottom: none; }
+    .field-key {
+      font-size: 0.73rem; color: var(--muted);
+      font-weight: 500; min-width: 120px; flex-shrink: 0;
+      padding-top: 1px;
+    }
+    .field-val {
+      font-size: 0.85rem; font-weight: 600; color: var(--text);
+      word-break: break-word;
+    }
+    .field-val.empty { color: var(--muted); font-weight: 400; font-style: italic; }
+
+    /* ── Gender badge ── */
+    .gender-badge {
+      display: inline-block;
+      padding: 2px 10px; border-radius: 20px;
+      font-size: 0.75rem; font-weight: 700;
+    }
+    .gender-M { background: #dbeafe; color: #1d4ed8; }
+    .gender-F { background: #fce7f3; color: #be185d; }
+    .gender-T { background: #f3e8ff; color: #7c3aed; }
+
+    /* ── XML/raw data toggle ── */
+    .raw-toggle {
+      margin: 0 20px 16px;
+      padding: 10px 14px;
+      background: #f8f9ff;
+      border: 1px solid #e8eaf6;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.78rem; color: var(--primary);
+      font-weight: 600;
+      display: flex; align-items: center; justify-content: space-between;
+      user-select: none;
+    }
+    .raw-data {
+      margin: 0 20px 20px;
+      background: #1e293b;
+      border-radius: 10px;
+      padding: 14px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.68rem;
+      color: #94a3b8;
+      overflow-x: auto;
+      white-space: pre;
+      display: none;
+      line-height: 1.6;
+    }
+    .raw-data .xml-tag   { color: #7dd3fc; }
+    .raw-data .xml-attr  { color: #86efac; }
+    .raw-data .xml-val   { color: #fde68a; }
+    .raw-data.show { display: block; }
+
+    /* ── Scan again button ── */
+    .btn-again {
+      display: block; width: calc(100% - 40px);
+      margin: 0 20px 20px;
+      padding: 13px;
+      background: var(--primary); color: white;
+      border: none; border-radius: 12px;
+      font-size: 0.9rem; font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      text-align: center;
+    }
+    .btn-again:hover { background: #283593; }
+
+    /* ── Algorithm info panel ── */
+    .algo-panel {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    }
+    .algo-panel h3 {
+      font-size: 0.9rem; font-weight: 700; color: var(--primary);
+      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .algo-step {
+      display: flex; gap: 12px; margin-bottom: 12px;
+    }
+    .step-num {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--primary); color: white;
+      font-size: 0.72rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 1px;
+    }
+    .step-text { font-size: 0.8rem; color: var(--text); line-height: 1.5; }
+    .step-text strong { color: var(--primary); }
+    .step-text code {
+      background: #f3f4f6; padding: 1px 6px; border-radius: 4px;
+      font-size: 0.75rem; font-family: 'Courier New', monospace; color: #374151;
+    }
+
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .btn-start.loading .spinner { display: block; }
+    .btn-start.loading .btn-text { opacity: 0.7; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Success flash on viewport ── */
+    .success-flash {
+      position: absolute; inset: 0;
+      background: rgba(46,125,50,0.3);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.1s;
+    }
+    .success-flash.flash { opacity: 1; transition: opacity 0s; }
+
+    @media (max-width: 400px) {
+      .field-key { min-width: 100px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="header">
+  <div class="header-logo">🪪</div>
+  <div>
+    <h1>Aadhaar QR Scanner</h1>
+    <p>Scan Aadhaar card QR code to extract details</p>
+  </div>
+</div>
+
+<!-- ── Algorithm info strip ── -->
+<div class="algo-strip">
+  <strong>Algorithm:</strong>
+  <span class="algo-badge">QR Code ISO 18004</span>
+  <span class="algo-badge">Reed-Solomon ECC</span>
+  <span class="algo-badge">XML → DOM Parse</span>
+  <span class="algo-badge">PrintLetterBarcodeData</span>
+  <span class="algo-badge">ZXing JS Decoder</span>
+</div>
+
+<div class="container">
+
+  <!-- ── Error / info messages ── -->
+  <div class="msg error" id="msgError">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+    <span id="msgErrorText">An error occurred.</span>
+  </div>
+  <div class="msg info" id="msgInfo">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 2 12zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+    <span id="msgInfoText"></span>
+  </div>
+
+  <!-- ── Scanner card ── -->
+  <div class="scanner-card" id="scannerCard">
+    <!-- Viewport -->
+    <div class="viewport" id="viewport">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="canvas"></canvas>
+
+      <!-- Dimming overlay -->
+      <div class="dim-overlay"></div>
+
+      <!-- Scan frame with corner brackets -->
+      <div class="scan-overlay">
+        <div class="scan-frame" id="scanFrame">
+          <div class="scan-line" id="scanLine"></div>
+          <div class="corner-br"></div>
+          <div class="corner-bl"></div>
+        </div>
+      </div>
+
+      <!-- Success flash -->
+      <div class="success-flash" id="successFlash"></div>
+
+      <!-- Status label -->
+      <div class="scan-label" id="scanLabel">Point at Aadhaar QR Code</div>
+    </div>
+
+    <!-- Controls (Flash / Focus / Close — mirrors Android FABs) -->
+    <div class="controls">
+      <button class="ctrl-btn" id="btnFlash" onclick="toggleFlash()" title="Toggle Flash">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path id="flashIcon" d="M7 2v11h3v9l7-12h-4l4-8z"/>
+        </svg>
+        <span id="flashLabel">Flash</span>
+      </button>
+      <div class="ctrl-divider"></div>
+      <button class="ctrl-btn active" id="btnFocus" onclick="toggleFocus()" title="Toggle Autofocus">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path id="focusIcon" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm-7 7H3v4h4v-2H5v-2zm14 0v2h-2v2h4v-4h-2zM5 5h2V3H3v4h2V5zm11-2v2h2v2h2V3h-4z"/>
+        </svg>
+        <span>Autofocus</span>
+      </button>
+      <div class="ctrl-divider"></div>
+      <button class="ctrl-btn" onclick="stopScanner(true)" title="Close Scanner">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+        <span>Close</span>
+      </button>
+    </div>
+
+    <!-- Start button area -->
+    <div class="start-area">
+      <button class="btn-start" id="btnStart" onclick="startScanner()">
+        <div class="spinner"></div>
+        <span class="btn-text">📷 Start Scanning</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Result card ── -->
+  <div class="result-card" id="resultCard">
+    <div class="result-header">
+      <div class="result-icon">✅</div>
+      <div>
+        <h2>Aadhaar Details Extracted</h2>
+        <p id="resultTimestamp"></p>
+      </div>
+    </div>
+
+    <!-- Aadhaar number (masked like official apps) -->
+    <div class="aadhaar-num">
+      <div>
+        <label>Aadhaar Number (UID)</label>
+        <div class="aadhaar-digits" id="aadhaarDisplay"></div>
+      </div>
+    </div>
+
+    <!-- Personal Info section -->
+    <div class="section">
+      <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Personal Information
+      </div>
+      <div class="field-row"><span class="field-key">Full Name</span><span class="field-val" id="fName"></span></div>
+      <div class="field-row"><span class="field-key">Gender</span><span class="field-val" id="fGender"></span></div>
+      <div class="field-row"><span class="field-key">Date of Birth</span><span class="field-val" id="fDob"></span></div>
+      <div class="field-row"><span class="field-key">Year of Birth</span><span class="field-val" id="fYob"></span></div>
+      <div class="field-row"><span class="field-key">Care Of</span><span class="field-val" id="fCo"></span></div>
+    </div>
+
+    <!-- Address section -->
+    <div class="section">
+      <div class="section-title">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+        Address
+      </div>
+      <div class="field-row"><span class="field-key">House / Flat</span><span class="field-val" id="fHouse"></span></div>
+      <div class="field-row"><span class="field-key">Street</span><span class="field-val" id="fStreet"></span></div>
+      <div class="field-row"><span class="field-key">Landmark</span><span class="field-val" id="fLandmark"></span></div>
+      <div class="field-row"><span class="field-key">Locality</span><span class="field-val" id="fLocality"></span></div>
+      <div class="field-row"><span class="field-key">Village/Town/City</span><span class="field-val" id="fVtc"></span></div>
+      <div class="field-row"><span class="field-key">Post Office</span><span class="field-val" id="fPo"></span></div>
+      <div class="field-row"><span class="field-key">Sub-District</span><span class="field-val" id="fSubdist"></span></div>
+      <div class="field-row"><span class="field-key">District</span><span class="field-val" id="fDist"></span></div>
+      <div class="field-row"><span class="field-key">State</span><span class="field-val" id="fState"></span></div>
+      <div class="field-row"><span class="field-key">PIN Code</span><span class="field-val" id="fPin"></span></div>
+      <div class="field-row"><span class="field-key">Country</span><span class="field-val" id="fCountry"></span></div>
+    </div>
+
+    <!-- Raw XML toggle -->
+    <div style="height:12px"></div>
+    <div class="raw-toggle" onclick="toggleRaw()">
+      <span>🔍 View Raw XML (QR Payload)</span>
+      <span id="rawArrow">▼</span>
+    </div>
+    <pre class="raw-data" id="rawDataEl"></pre>
+
+    <!-- Scan again -->
+    <button class="btn-again" onclick="resetScanner()">🔄 Scan Another QR Code</button>
+  </div>
+
+  <!-- ── Algorithm explanation panel ── -->
+  <div class="algo-panel">
+    <h3>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color:#1a237e"><path d="M9 4.58V4c0-1.1.9-2 2-2h2c1.1 0 2 .9 2 2v.58c.95.35 1.8.9 2.52 1.58l.5-.29c.95-.55 2.17-.22 2.72.73l1 1.73c.55.96.22 2.18-.73 2.73l-.5.29c.07.48.11.97.11 1.47s-.04.99-.11 1.47l.5.29c.96.55 1.28 1.77.73 2.73l-1 1.73c-.55.95-1.77 1.28-2.73.73l-.5-.29c-.72.68-1.57 1.23-2.52 1.58V20c0 1.1-.9 2-2 2h-2c-1.1 0-2-.9-2-2v-.58c-.95-.35-1.8-.9-2.52-1.58l-.5.29c-.96.55-2.18.22-2.73-.73l-1-1.73c-.55-.96-.22-2.18.73-2.73l.5-.29C4.04 12.99 4 12.5 4 12s.04-.99.11-1.47l-.5-.29c-.96-.55-1.28-1.77-.73-2.73l1-1.73c.55-.95 1.77-1.28 2.73-.73l.5.29c.72-.68 1.57-1.23 2.52-1.58zM12 15c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3z"/></svg>
+      How This Scanner Works (Deep Logic)
+    </h3>
+
+    <div class="algo-step">
+      <div class="step-num">1</div>
+      <div class="step-text">
+        <strong>Camera Access via MediaDevices API</strong><br>
+        Requests rear camera (<code>facingMode: "environment"</code>), streams to <code>&lt;video&gt;</code> element.
+        Android equivalent: Google Mobile Vision <code>BarcodeCapture</code> fragment.
+      </div>
+    </div>
+
+    <div class="algo-step">
+      <div class="step-num">2</div>
+      <div class="step-text">
+        <strong>QR Detection — ZXing Decoder (Reed-Solomon)</strong><br>
+        Frames are sampled and decoded using <strong>ZXing</strong> (Zebra Crossing) library.
+        QR codes use <strong>Reed-Solomon error correction</strong> to recover data even if up to 15% (Level M) of the QR is damaged.
+        ZXing identifies finder patterns (3 corner squares), timing patterns, and alignment patterns to locate and decode the QR matrix.
+      </div>
+    </div>
+
+    <div class="algo-step">
+      <div class="step-num">3</div>
+      <div class="step-text">
+        <strong>XML Parsing — The Core Logic</strong><br>
+        Aadhaar QR raw value is <strong>XML</strong> (not plain text). The app checks:
+        (a) Root element = <code>PrintLetterBarcodeData</code>
+        (b) Attribute <code>uid</code> exists → valid Aadhaar QR.
+        Uses <code>DOMParser</code> (<code>text/xml</code>) then <code>getAttribute()</code>. Android used <code>org.json.XML.toJSONObject()</code>.
+      </div>
+    </div>
+
+    <div class="algo-step">
+      <div class="step-num">4</div>
+      <div class="step-text">
+        <strong>17-Field Data Extraction (UidModel)</strong><br>
+        Extracts: <code>uid, name, gender, yob, dob, co, house, street, lm, loc, vtc, po, dist, subdist, state, pc, country</code>.
+        Gender codes: <code>M</code>=Male, <code>F</code>=Female, <code>T</code>=Transgender.
+      </div>
+    </div>
+
+    <div class="algo-step">
+      <div class="step-num">5</div>
+      <div class="step-text">
+        <strong>Result Display &amp; Masked UID</strong><br>
+        Aadhaar number is partially masked (first 8 digits shown as ✱✱✱✱ ✱✱✱✱ for privacy, last 4 visible). All address fields displayed in structured layout.
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+/*
+ * ══════════════════════════════════════════════════════════════════
+ * AADHAAR QR SCANNER — JAVASCRIPT IMPLEMENTATION
+ * Port of: AadharCardQrCodeScanner (Android SDK by abhiandroidknowledge)
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * CORE ALGORITHM (mirrors AcqsActivity.java):
+ *
+ *   onRetrieved(barcode) {
+ *     String rawValue = barcode.rawValue;                    // raw XML string
+ *     JSONObject object = XML.toJSONObject(rawValue);        // parse XML
+ *     if (object.has("PrintLetterBarcodeData")) {            // validation #1
+ *       JSONObject data = object.getJSONObject("PrintLetterBarcodeData");
+ *       if (data.has("uid")) {                              // validation #2
+ *         // extract all 17 fields...
+ *         UidModel model = new UidModel(...);
+ *         Intent result = new Intent();
+ *         result.putExtra("result", model);
+ *         setResult(RESULT_OK, result);
+ *         finish();
+ *       } else { showSnackBar("Invalid QR format"); }
+ *     } else { showSnackBar("Invalid QR format"); }
+ *   }
+ */
+
+// ── State ──────────────────────────────────────────────────────────
+let stream = null;
+let codeReader = null;
+let scanning = false;
+let flashOn = false;
+let autoFocusOn = true;
+let track = null;
+let rawShowing = false;
+
+// ── DOM refs ──────────────────────────────────────────────────────
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('canvas');
+const btnStart   = document.getElementById('btnStart');
+const scannerCard = document.getElementById('scannerCard');
+const resultCard  = document.getElementById('resultCard');
+const scanLabel   = document.getElementById('scanLabel');
+const scanLine    = document.getElementById('scanLine');
+const successFlash = document.getElementById('successFlash');
+
+// ── Start Scanner ─────────────────────────────────────────────────
+async function startScanner() {
+  if (scanning) return;
+
+  // Show loading state
+  btnStart.classList.add('loading');
+  btnStart.disabled = true;
+  document.querySelector('.btn-text').textContent = 'Starting Camera…';
+  hideMessages();
+
+  try {
+    // STEP 1: Request camera — prefer rear camera (environment)
+    // Android equivalent: barcodeCapture.setShowFlash(false).shouldAutoFocus(true)
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+
+    video.srcObject = stream;
+    await video.play();
+
+    // Get the video track for flash/focus control
+    track = stream.getVideoTracks()[0];
+
+    // STEP 2: Initialize ZXing QR code reader
+    // Android equivalent: barcodeCapture.setBarcodeFormat(Barcode.QR_CODE)
+    codeReader = new ZXingBrowser.BrowserQRCodeReader();
+
+    scanning = true;
+    scanLabel.textContent = 'Point at Aadhaar QR Code';
+
+    // Update button to "scanning" state
+    btnStart.classList.remove('loading');
+    btnStart.disabled = true;
+    document.querySelector('.btn-text').textContent = '🔍 Scanning…';
+
+    // STEP 3: Continuous scan loop
+    // Android equivalent: barcodeCapture.onResume() / setRetrieval(this)
+    scanLoop();
+
+  } catch (err) {
+    btnStart.classList.remove('loading');
+    btnStart.disabled = false;
+    document.querySelector('.btn-text').textContent = '📷 Start Scanning';
+
+    if (err.name === 'NotAllowedError') {
+      showError('Camera permission denied. Please allow camera access and try again.');
+    } else if (err.name === 'NotFoundError') {
+      showError('No camera found on this device.');
+    } else {
+      showError('Failed to start camera: ' + err.message);
+    }
+  }
+}
+
+// ── Scan Loop ─────────────────────────────────────────────────────
+/*
+ * Continuously captures frames from the video stream and attempts
+ * QR decode using ZXing's BrowserQRCodeReader.
+ *
+ * Android equivalent:
+ *   BarcodeCapture internally uses Camera2 API + Google Vision
+ *   detector running on each preview frame, calling onRetrieved()
+ *   callback when a barcode is found.
+ *
+ * setSupportMultipleScan(false) → we stop after first successful decode
+ */
+async function scanLoop() {
+  if (!scanning) return;
+
+  const ctx = canvas.getContext('2d');
+
+  const loop = async () => {
+    if (!scanning || video.readyState < 2) {
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+
+    try {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const luminanceSource = new ZXingBrowser.ZXing.HTMLCanvasElementLuminanceSource(canvas);
+      const binaryBitmap = new ZXingBrowser.ZXing.BinaryBitmap(
+        new ZXingBrowser.ZXing.HybridBinarizer(luminanceSource)
+      );
+
+      const result = new ZXingBrowser.ZXing.QRCodeReader().decode(binaryBitmap);
+
+      if (result) {
+        // QR successfully decoded — mirrors onRetrieved(barcode) callback
+        onQRDetected(result.getText());
+        return; // stop loop after detection
+      }
+    } catch (e) {
+      // ZXing throws NotFoundException when no QR found in frame — this is normal
+      // Android equivalent: detection just silently continues if no barcode found
+    }
+
+    requestAnimationFrame(loop);
+  };
+
+  requestAnimationFrame(loop);
+}
+
+// ── QR Detected Callback ──────────────────────────────────────────
+/*
+ * CORE ALGORITHM — mirrors AcqsActivity.java onRetrieved()
+ *
+ * Android Java code:
+ *   String rawValue = barcode.rawValue;
+ *   JSONObject object = XML.toJSONObject(rawValue);
+ *   if (object.has("PrintLetterBarcodeData")) {
+ *     JSONObject data = object.getJSONObject("PrintLetterBarcodeData");
+ *     if (data.has("uid")) { ... extract fields ... }
+ *   }
+ *
+ * HTML5 JS equivalent uses DOMParser instead of org.json.XML:
+ */
+function onQRDetected(rawValue) {
+  // Pause scanning (Android: pauseBarcodeScanner())
+  scanning = false;
+  scanLabel.textContent = '✅ QR Code Detected!';
+
+  // Flash green success overlay
+  successFlash.classList.add('flash');
+  setTimeout(() => successFlash.classList.remove('flash'), 300);
+
+  // VALIDATION #1: Parse XML and check root element = "PrintLetterBarcodeData"
+  let xmlDoc, dataEl;
+  try {
+    const parser = new DOMParser();
+    xmlDoc = parser.parseFromString(rawValue, 'text/xml');
+
+    // Check for XML parse error
+    const parseError = xmlDoc.querySelector('parsererror');
+    if (parseError) {
+      showScanError('Invalid QR format: not valid XML');
+      resumeScanning();
+      return;
+    }
+
+    // Android: object.has("PrintLetterBarcodeData")
+    dataEl = xmlDoc.querySelector('PrintLetterBarcodeData');
+    if (!dataEl) {
+      showScanError('Invalid QR format: not an Aadhaar QR code');
+      resumeScanning();
+      return;
+    }
+
+    // VALIDATION #2: Android: printLetterBarcodeData.has("uid")
+    const uid = dataEl.getAttribute('uid');
+    if (!uid) {
+      showScanError('Invalid QR format: missing UID');
+      resumeScanning();
+      return;
+    }
+
+    // ── EXTRACT ALL 17 FIELDS (UidModel.java mapping) ──────────
+    // XML attr → UidModel field → Description
+    const fields = {
+      uid:     dataEl.getAttribute('uid')     || '',  // AADHARNUMBER
+      name:    dataEl.getAttribute('name')    || '',  // FULLNAME
+      gender:  dataEl.getAttribute('gender')  || '',  // GENDER (M/F/T)
+      yob:     dataEl.getAttribute('yob')     || '',  // YEAROFBIRTH
+      dob:     dataEl.getAttribute('dob')     || '',  // DATEOFBIRTH
+      co:      dataEl.getAttribute('co')      || '',  // CAREOF
+      house:   dataEl.getAttribute('house')   || '',  // HOUSE
+      street:  dataEl.getAttribute('street')  || '',  // STREET
+      lm:      dataEl.getAttribute('lm')      || '',  // LANDMARK
+      loc:     dataEl.getAttribute('loc')     || '',  // LOCALITY
+      vtc:     dataEl.getAttribute('vtc')     || '',  // VILLAGETOWNCITY
+      po:      dataEl.getAttribute('po')      || '',  // POSTOFFICE
+      dist:    dataEl.getAttribute('dist')    || '',  // DISTRICT
+      subdist: dataEl.getAttribute('subdist') || '',  // SUBDISTRICT
+      state:   dataEl.getAttribute('state')   || '',  // STATE
+      pc:      dataEl.getAttribute('pc')      || '',  // POSTALCODE
+      country: dataEl.getAttribute('country') || '',  // COUNTRY
+    };
+
+    // Display results
+    displayResult(fields, rawValue);
+
+  } catch (err) {
+    showScanError('Error parsing QR data: ' + err.message);
+    resumeScanning();
+  }
+}
+
+// ── Display Result (mirrors MainActivity.java onActivityResult) ──
+function displayResult(f, rawXml) {
+  // Stop camera stream
+  stopScanner(false);
+
+  // Timestamp
+  document.getElementById('resultTimestamp').textContent =
+    'Scanned at ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  // ── Aadhaar Number (masked: XXXX XXXX 1234) ──
+  // Privacy: show last 4 digits clearly, mask first 8
+  const uid = f.uid;
+  let maskedUid = uid;
+  if (uid.length === 12) {
+    maskedUid = '✱✱✱✱ ✱✱✱✱ ' + uid.slice(8);
+  } else {
+    // format with spaces
+    maskedUid = uid.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3');
+  }
+  document.getElementById('aadhaarDisplay').innerHTML =
+    `<span class="uid-mask">✱✱✱✱ ✱✱✱✱ </span>${uid.slice(-4)}`;
+
+  // ── Gender with badge (M=Male, F=Female, T=Transgender) ──
+  const genderMap = { M: 'Male', F: 'Female', T: 'Transgender' };
+  const genderLabel = genderMap[f.gender] || f.gender;
+  const genderEl = document.getElementById('fGender');
+  if (f.gender) {
+    genderEl.innerHTML = `<span class="gender-badge gender-${f.gender}">${genderLabel}</span>`;
+  } else {
+    genderEl.innerHTML = setField('');
+  }
+
+  // ── All other fields ──
+  setFieldEl('fName',    f.name);
+  setFieldEl('fDob',     f.dob);
+  setFieldEl('fYob',     f.yob);
+  setFieldEl('fCo',      f.co);
+  setFieldEl('fHouse',   f.house);
+  setFieldEl('fStreet',  f.street);
+  setFieldEl('fLandmark', f.lm);
+  setFieldEl('fLocality', f.loc);
+  setFieldEl('fVtc',     f.vtc);
+  setFieldEl('fPo',      f.po);
+  setFieldEl('fSubdist', f.subdist);
+  setFieldEl('fDist',    f.dist);
+  setFieldEl('fState',   f.state);
+  setFieldEl('fPin',     f.pc);
+  setFieldEl('fCountry', f.country);
+
+  // ── Raw XML (syntax highlighted) ──
+  document.getElementById('rawDataEl').innerHTML = syntaxHighlightXml(rawXml);
+
+  // ── Show result, hide scanner ──
+  scannerCard.style.display = 'none';
+  resultCard.classList.add('show');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function setFieldEl(id, val) {
+  const el = document.getElementById(id);
+  if (val && val.trim()) {
+    el.textContent = val;
+    el.className = 'field-val';
+  } else {
+    el.textContent = 'Not available';
+    el.className = 'field-val empty';
+  }
+}
+
+function syntaxHighlightXml(xml) {
+  return xml
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/(&lt;\/?)([\w:]+)/g, '<span class="xml-tag">$1$2</span>')
+    .replace(/([\w:]+)=/g, '<span class="xml-attr">$1</span>=')
+    .replace(/="([^"]*)"/g, '="<span class="xml-val">$1</span>"');
+}
+
+// ── Flash Toggle ──────────────────────────────────────────────────
+/*
+ * Android: barcodeCapture.setShowFlash(true/false)
+ * HTML5:   ImageCapture API with torch constraint
+ */
+async function toggleFlash() {
+  if (!track) { showError('Start scanner first to use flash.'); return; }
+
+  const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+  if (!capabilities.torch) {
+    showInfo('Flash/torch not supported on this device or browser.');
+    return;
+  }
+
+  flashOn = !flashOn;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: flashOn }] });
+    const btn = document.getElementById('btnFlash');
+    btn.classList.toggle('active', flashOn);
+    document.getElementById('flashLabel').textContent = flashOn ? 'Flash ON' : 'Flash';
+  } catch (e) {
+    showError('Failed to toggle flash: ' + e.message);
+    flashOn = !flashOn;
+  }
+}
+
+// ── Autofocus Toggle ──────────────────────────────────────────────
+/*
+ * Android: barcodeCapture.shouldAutoFocus(true/false)
+ * HTML5:   focusMode constraint ('continuous' vs 'manual')
+ */
+async function toggleFocus() {
+  if (!track) return;
+  autoFocusOn = !autoFocusOn;
+  const btn = document.getElementById('btnFocus');
+  btn.classList.toggle('active', autoFocusOn);
+
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps.focusMode && caps.focusMode.includes('continuous')) {
+      await track.applyConstraints({
+        advanced: [{ focusMode: autoFocusOn ? 'continuous' : 'manual' }]
+      });
+    }
+  } catch(e) { /* not all browsers support this */ }
+}
+
+// ── Stop / Pause Scanner ─────────────────────────────────────────
+function stopScanner(resetUI) {
+  scanning = false;
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    track = null;
+  }
+  video.srcObject = null;
+  if (resetUI) {
+    btnStart.disabled = false;
+    document.querySelector('.btn-text').textContent = '📷 Start Scanning';
+    scanLabel.textContent = 'Camera stopped';
+  }
+}
+
+function resumeScanning() {
+  // Android: resumeBarcodeScanner() → barcodeCapture.onResume()
+  setTimeout(() => {
+    scanning = true;
+    scanLabel.textContent = 'Point at Aadhaar QR Code';
+    scanLoop();
+  }, 1500);
+}
+
+// ── Reset ─────────────────────────────────────────────────────────
+function resetScanner() {
+  resultCard.classList.remove('show');
+  scannerCard.style.display = 'block';
+  btnStart.disabled = false;
+  document.querySelector('.btn-text').textContent = '📷 Start Scanning';
+  scanLabel.textContent = 'Point at Aadhaar QR Code';
+  hideMessages();
+  rawShowing = false;
+  document.getElementById('rawDataEl').classList.remove('show');
+  document.getElementById('rawArrow').textContent = '▼';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Raw XML Toggle ────────────────────────────────────────────────
+function toggleRaw() {
+  rawShowing = !rawShowing;
+  document.getElementById('rawDataEl').classList.toggle('show', rawShowing);
+  document.getElementById('rawArrow').textContent = rawShowing ? '▲' : '▼';
+}
+
+// ── Messages ──────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('msgError');
+  document.getElementById('msgErrorText').textContent = msg;
+  el.classList.add('show');
+  document.getElementById('msgInfo').classList.remove('show');
+}
+function showInfo(msg) {
+  const el = document.getElementById('msgInfo');
+  document.getElementById('msgInfoText').textContent = msg;
+  el.classList.add('show');
+  document.getElementById('msgError').classList.remove('show');
+}
+function showScanError(msg) {
+  scanLabel.textContent = '⚠ ' + msg;
+  setTimeout(() => { scanLabel.textContent = 'Point at Aadhaar QR Code'; }, 2500);
+}
+function hideMessages() {
+  document.getElementById('msgError').classList.remove('show');
+  document.getElementById('msgInfo').classList.remove('show');
+}
+
+// ── Check HTTPS requirement ───────────────────────────────────────
+if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+  showError('Camera requires HTTPS. Please open this page over a secure (https://) connection.');
+}
+
+// ── Check ZXing availability ──────────────────────────────────────
+window.addEventListener('load', () => {
+  if (typeof ZXingBrowser === 'undefined') {
+    showError('QR decoder library failed to load. Check your internet connection and refresh.');
+  }
+});
+</script>
+
+</body>
+</html>
