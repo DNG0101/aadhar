@@ -6,271 +6,264 @@
   <title>Aadhaar QR Code Scanner</title>
 
   <!--
-  ═══════════════════════════════════════════════════════════════════════
-  DEEP LOGIC DOCUMENTATION — AADHAAR QR SCANNER
-  ═══════════════════════════════════════════════════════════════════════
+  ══════════════════════════════════════════════════════════════════════
+  AADHAAR QR SCANNER — COMPLETE FORMAT DOCUMENTATION
+  ══════════════════════════════════════════════════════════════════════
 
-  SOURCE PROJECT : AadharCardQrCodeScanner (Android SDK)
-  LANGUAGE       : Java (Android) → Ported to Vanilla JS / HTML5
+  THREE QR FORMATS HANDLED:
 
-  ────────────────────────────────────────────────────────────────────
-  ALGORITHM OVERVIEW
-  ────────────────────────────────────────────────────────────────────
+  ─── FORMAT A: Old XML (pre-2019 physical Aadhaar letter) ───────────
+    QR encoding mode : Byte / Alphanumeric
+    Raw data         : XML string
+    Root element     : <PrintLetterBarcodeData ... />
+    Fields (attrs)   : uid, name, gender, yob, dob, co, house, street,
+                       lm, loc, vtc, po, dist, subdist, state, pc, country
+    Parse            : DOMParser("text/xml") → getAttribute()
+    Android original : org.json.XML.toJSONObject(rawValue)
 
-  STEP 1 — CAMERA CAPTURE
-    Android: Google Mobile Vision BarcodeCapture fragment
-      barcodeCapture.setBarcodeFormat(Barcode.QR_CODE)
-      .setSupportMultipleScan(false)
-      .setShowDrawRect(true)
-      .shouldAutoFocus(true)
-    HTML5: navigator.mediaDevices.getUserMedia({ video: { facingMode:"environment" } })
-           Renders to <video>, frames captured via <canvas>
+  ─── FORMAT B: New Secure QR — Numeric-mode (most modern cards) ─────
+    QR encoding mode : NUMERIC (digits only — jsQR gives decimal string)
+    Raw data         : Very long decimal number string (100+ digits)
+    Decode steps     :
+      1. BigInt(decimalString) → convert to big-endian byte array
+      2. Split byte array by 0xFF (decimal 255) delimiter
+      3. Segment 0 = header bytes (email+mobile indicator + refId)
+      4. Segments 1-14 = UTF-8 text fields:
+           [1] Name         [2] DOB          [3] Gender (M/F/T)
+           [4] Care Of      [5] District     [6] Landmark
+           [7] House        [8] Location     [9] PIN Code
+           [10] Post Office [11] State       [12] Street
+           [13] Sub-Dist    [14] VTC
+      5. After seg[14]: 32-byte phone hash + 32-byte email hash + JPEG photo + RSA signature
 
-  STEP 2 — QR DECODING ALGORITHM (Reed-Solomon / ZXing)
-    Library used: jsQR (port of ZXing's QR reader to JavaScript)
-    How QR decoding works:
-      a) Locate 3 "finder patterns" (the 3 corner squares)
-      b) Detect timing patterns and alignment patterns
-      c) Extract data modules (black/white cells)
-      d) Apply Reed-Solomon Error Correction (Level M = 15% recovery)
-      e) Decode bit stream according to encoding mode (Byte mode for Aadhaar)
-      f) Return decoded string (raw XML in Aadhaar's case)
+  ─── FORMAT C: New Secure QR — Byte-mode ───────────────────────────
+    QR encoding mode : BYTE (jsQR gives code.binaryData as raw bytes)
+    Same structure as Format B but bytes come directly from code.binaryData
+    (same 0xFF-split algorithm)
 
-  STEP 3 — XML PARSING (Core Aadhaar Logic)
-    Aadhaar QR raw value = XML string (NOT JSON, NOT plain text)
-    Android: org.json.XML.toJSONObject(rawValue) → JSONObject
-    HTML5:   DOMParser.parseFromString(rawValue, "text/xml") → XMLDocument
+  ─── Why the decimal → bytes conversion is needed ───────────────────
+    UIDAI chose NUMERIC encoding for newer QRs because:
+    - Numeric mode packs 3 digits per 10 bits (vs 8 bits per byte for byte mode)
+    - A numeric-mode QR can store ~40% more data in the same physical size
+    - The decimal string represents the raw binary payload as a big-endian integer
+    - BigInt(str) → byte array gives the actual binary payload
 
-    VALIDATION (exact logic from AcqsActivity.java onRetrieved()):
-      1. object.has("PrintLetterBarcodeData")  → root XML element
-      2. printLetterBarcodeData.has("uid")     → uid attribute present
-      Both must pass, else → "Invalid QR format"
+  ─── UIDAI Certificate Verification (from MSI analysis) ─────────────
+    The MSI contains two UIDAI code-signing certificates:
+      • e-Mudhra Sub CA Class 3 (DS UNIQUE IDENTIFICATION AUTHORITY OF INDIA 7)
+      • Capricorn CA 2014 (DS UIDAI 01)
+    After field extraction, apps verify the RSA-2048 signature appended at end
+    of the byte array using UIDAI's public key (from these certificates).
+    This scanner extracts fields only (no signature verification).
 
-  STEP 4 — UidModel (17 fields extracted from XML attributes)
-    XML Attr  | Android Field   | Description
-    ----------|-----------------|------------------------------------------
-    uid       | AADHARNUMBER    | 12-digit Aadhaar number
-    name      | FULLNAME        | Holder's full name
-    gender    | GENDER          | M=Male F=Female T=Transgender
-    yob       | YEAROFBIRTH     | Year of birth (YYYY)
-    dob       | DATEOFBIRTH     | Full DOB (DD/MM/YYYY)
-    co        | CAREOF          | Care Of (S/O, D/O, W/O)
-    house     | HOUSE           | House/flat number
-    street    | STREET          | Street/road
-    lm        | LANDMARK        | Nearby landmark
-    loc       | LOCALITY        | Locality/area
-    vtc       | VILLAGETOWNCITY | Village / Town / City
-    po        | POSTOFFICE      | Post office name
-    dist      | DISTRICT        | District
-    subdist   | SUBDISTRICT     | Sub-district / Taluka
-    state     | STATE           | State
-    pc        | POSTALCODE      | 6-digit PIN code
-    country   | COUNTRY         | Country
-
-  STEP 5 — RESULT DELIVERY
-    Android: Intent.putExtra("result", uidModel) → setResult(RESULT_OK) → finish()
-    HTML5:   Display all fields in result card on same page
-
-  ────────────────────────────────────────────────────────────────────
-  LIBRARIES
-  ────────────────────────────────────────────────────────────────────
-  Android original:
-    • play-services-vision  (Google Mobile Vision — camera + QR decode)
-    • mobilevisionbarcodescanner (BarcodeCapture wrapper)
-    • java-json.jar (org.json.XML.toJSONObject)
-
-  HTML5 port:
-    • jsQR v1.4.0 (CDN) — QR decode from canvas ImageData (Reed-Solomon)
-    • Native DOMParser  — XML parse (replaces org.json.XML)
-    • MediaDevices API  — Camera stream
-  ═══════════════════════════════════════════════════════════════════════
+  ─── jsQR library notes ─────────────────────────────────────────────
+    code.data       = decoded string (for numeric QR: the decimal digit string)
+    code.binaryData = number[] array of raw bytes (for byte-mode QR: actual bytes)
+    For numeric QRs, binaryData contains ASCII bytes of the digit characters —
+    NOT the actual data bytes → must convert via BigInt instead.
+  ══════════════════════════════════════════════════════════════════════
   -->
 
-  <!-- jsQR: reliable, pure-JS QR decoder, no global namespace issues -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     :root{
-      --primary:#1a237e;--accent:#ff6f00;--success:#2e7d32;
-      --error:#c62828;--bg:#f0f2f5;--card:#fff;--text:#1a1a2e;
-      --muted:#6b7280;--border:#e5e7eb;--scan:#00e5ff;
+      --pri:#1a237e;--ok:#2e7d32;--warn:#e65100;
+      --err:#c62828;--bg:#f0f2f5;--card:#fff;
+      --txt:#1a1a2e;--dim:#6b7280;--bdr:#e5e7eb;--sc:#00e5ff
     }
-    body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
 
-    .header{
-      background:linear-gradient(135deg,#1a237e,#3949ab);
-      color:#fff;padding:16px 20px;
-      display:flex;align-items:center;gap:14px;
-      box-shadow:0 2px 12px rgba(26,35,126,.35)
-    }
-    .header-logo{width:44px;height:44px;background:rgba(255,255,255,.15);border-radius:12px;
-      display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
-    .header h1{font-size:1.2rem;font-weight:700}
-    .header p{font-size:.73rem;opacity:.75;margin-top:2px}
+    .hdr{background:linear-gradient(135deg,#1a237e,#3949ab);color:#fff;
+      padding:14px 18px;display:flex;align-items:center;gap:12px;
+      box-shadow:0 2px 12px rgba(26,35,126,.35)}
+    .hdr-ico{width:42px;height:42px;background:rgba(255,255,255,.15);border-radius:11px;
+      display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0}
+    .hdr h1{font-size:1.1rem;font-weight:700}
+    .hdr p{font-size:.7rem;opacity:.75;margin-top:2px}
 
-    .algo-strip{
-      background:#e8eaf6;border-left:4px solid var(--primary);
-      padding:9px 18px;font-size:.75rem;color:#283593;
-      display:flex;flex-wrap:wrap;gap:7px;align-items:center
-    }
-    .badge{background:var(--primary);color:#fff;border-radius:4px;padding:2px 8px;font-size:.7rem;font-weight:700}
+    .strip{background:#e8eaf6;border-left:4px solid var(--pri);padding:7px 15px;
+      font-size:.7rem;color:#283593;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+    .bge{background:var(--pri);color:#fff;border-radius:4px;padding:2px 7px;font-size:.67rem;font-weight:700}
+    .bge.r{background:#b71c1c}
 
-    .container{max-width:520px;margin:0 auto;padding:18px 14px 40px}
+    .wrap{max-width:520px;margin:0 auto;padding:15px 12px 40px}
 
-    .card{background:var(--card);border-radius:18px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.09);margin-bottom:18px}
+    .msg{border-radius:9px;padding:10px 13px;font-size:.8rem;
+      margin-bottom:12px;display:none;align-items:flex-start;gap:8px}
+    .msg.show{display:flex}
+    .msg.err{background:#fef2f2;border:1px solid #fca5a5;color:var(--err)}
+    .msg.inf{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
+    .msg.warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412}
+    .msg svg{flex-shrink:0;width:16px;height:16px;margin-top:1px}
 
-    .viewport{position:relative;width:100%;aspect-ratio:1;background:#000;overflow:hidden}
+    .card{background:var(--card);border-radius:17px;overflow:hidden;
+      box-shadow:0 4px 20px rgba(0,0,0,.09);margin-bottom:15px}
+
+    .vp{position:relative;width:100%;aspect-ratio:1;background:#111;overflow:hidden}
     #video{width:100%;height:100%;object-fit:cover;display:block}
     #canvas{display:none}
 
-    .dim{position:absolute;inset:0;
-      background:radial-gradient(ellipse 72% 72% at center,transparent 0%,rgba(0,0,0,.55) 100%);
+    .dimov{position:absolute;inset:0;
+      background:radial-gradient(ellipse 68% 68% at center,transparent 0%,rgba(0,0,0,.62) 100%);
       pointer-events:none}
-
-    .frame-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-    .scan-frame{width:68%;aspect-ratio:1;position:relative}
-    .scan-frame::before,.scan-frame::after,.scan-frame .br,.scan-frame .bl{
-      content:'';position:absolute;width:32px;height:32px;border-color:var(--scan);border-style:solid}
-    .scan-frame::before{top:0;left:0;border-width:4px 0 0 4px;border-radius:4px 0 0 4px}
-    .scan-frame::after{top:0;right:0;border-width:4px 4px 0 0;border-radius:0 4px 0 0}
-    .scan-frame .br{bottom:0;right:0;border-width:0 4px 4px 0;border-radius:0 0 4px 0}
-    .scan-frame .bl{bottom:0;left:0;border-width:0 0 4px 4px;border-radius:0 0 0 4px}
-
-    .scan-line{position:absolute;left:4px;right:4px;height:2px;
-      background:linear-gradient(90deg,transparent,var(--scan),transparent);
-      box-shadow:0 0 8px var(--scan);
-      animation:sweep 2s linear infinite}
-    @keyframes sweep{0%{top:4px;opacity:1}95%{top:calc(100% - 6px);opacity:1}100%{top:calc(100% - 6px);opacity:0}}
-
-    .scan-status{position:absolute;bottom:14px;left:0;right:0;text-align:center;
-      color:rgba(255,255,255,.9);font-size:.78rem;font-weight:500;
-      text-shadow:0 1px 4px rgba(0,0,0,.8);letter-spacing:.4px}
-
-    .flash-success{position:absolute;inset:0;background:rgba(46,125,50,.3);
+    .fw{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .sf{width:65%;aspect-ratio:1;position:relative}
+    .sf::before,.sf::after,.sf .br,.sf .bl{
+      content:'';position:absolute;width:28px;height:28px;border-color:var(--sc);border-style:solid}
+    .sf::before{top:0;left:0;border-width:4px 0 0 4px;border-radius:4px 0 0 4px}
+    .sf::after{top:0;right:0;border-width:4px 4px 0 0;border-radius:0 4px 0 0}
+    .sf .br{bottom:0;right:0;border-width:0 4px 4px 0;border-radius:0 0 4px 0}
+    .sf .bl{bottom:0;left:0;border-width:0 0 4px 4px;border-radius:0 0 0 4px}
+    .sl{position:absolute;left:4px;right:4px;height:2px;
+      background:linear-gradient(90deg,transparent,var(--sc),transparent);
+      box-shadow:0 0 8px var(--sc);animation:sw 2s linear infinite}
+    @keyframes sw{0%{top:4px;opacity:1}95%{top:calc(100% - 6px);opacity:1}100%{top:calc(100% - 6px);opacity:0}}
+    .okflash{position:absolute;inset:0;background:rgba(46,125,50,.35);
       opacity:0;pointer-events:none;transition:opacity .1s}
-    .flash-success.on{opacity:1;transition:opacity 0s}
+    .okflash.on{opacity:1;transition:opacity 0s}
+    .stat{position:absolute;bottom:12px;left:0;right:0;text-align:center;
+      color:rgba(255,255,255,.9);font-size:.75rem;font-weight:500;
+      text-shadow:0 1px 4px rgba(0,0,0,.8);padding:0 10px}
+    .fmttag{position:absolute;top:9px;right:9px;
+      background:rgba(0,0,0,.65);color:#fff;font-size:.63rem;font-weight:700;
+      padding:3px 8px;border-radius:20px;display:none;letter-spacing:.4px}
+    .fmttag.show{display:block}
 
-    .controls{display:flex;border-top:1px solid var(--border)}
-    .ctrl{flex:1;padding:13px 6px;background:none;border:none;cursor:pointer;
-      display:flex;flex-direction:column;align-items:center;gap:5px;
-      font-size:.68rem;color:var(--muted);font-weight:500;transition:background .15s,color .15s}
-    .ctrl:hover{background:#f3f4f6;color:var(--primary)}
-    .ctrl.on{color:var(--accent)}
-    .ctrl svg{width:22px;height:22px}
-    .cdiv{width:1px;background:var(--border);margin:10px 0}
+    .ctrls{display:flex;border-top:1px solid var(--bdr)}
+    .cb{flex:1;padding:11px 5px;background:none;border:none;cursor:pointer;
+      display:flex;flex-direction:column;align-items:center;gap:4px;
+      font-size:.65rem;color:var(--dim);font-weight:500;transition:background .15s,color .15s}
+    .cb:hover{background:#f3f4f6;color:var(--pri)}
+    .cb.on{color:#ff6f00}
+    .cb svg{width:20px;height:20px}
+    .cdv{width:1px;background:var(--bdr);margin:8px 0}
 
-    .start-wrap{padding:18px}
-    .btn-start{
-      width:100%;padding:14px;
+    .sw{padding:14px}
+    .btn{width:100%;padding:13px;
       background:linear-gradient(135deg,#1a237e,#3949ab);
-      color:#fff;border:none;border-radius:12px;
-      font-size:.95rem;font-weight:700;cursor:pointer;
-      display:flex;align-items:center;justify-content:center;gap:10px;
+      color:#fff;border:none;border-radius:11px;
+      font-size:.9rem;font-weight:700;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;gap:8px;
       transition:transform .1s,box-shadow .2s;
-      box-shadow:0 4px 14px rgba(26,35,126,.35)
-    }
-    .btn-start:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 20px rgba(26,35,126,.45)}
-    .btn-start:disabled{background:#9ca3af;box-shadow:none;cursor:not-allowed}
-
-    .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);
+      box-shadow:0 4px 14px rgba(26,35,126,.35)}
+    .btn:hover:not(:disabled){transform:translateY(-1px)}
+    .btn:disabled{background:#9ca3af;box-shadow:none;cursor:not-allowed}
+    .sp{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);
       border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
-    .loading .spinner{display:block}
+    .loading .sp{display:block}
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    .msg{border-radius:10px;padding:11px 14px;font-size:.83rem;
-      margin-bottom:14px;display:none;align-items:flex-start;gap:9px}
-    .msg.show{display:flex}
-    .msg.err{background:#fef2f2;border:1px solid #fca5a5;color:var(--error)}
-    .msg.inf{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
-    .msg svg{flex-shrink:0;width:17px;height:17px;margin-top:1px}
+    /* upload area */
+    .upload-row{display:flex;gap:8px;padding:0 14px 14px}
+    .btn-upload{flex:1;padding:11px;background:#f8f9ff;
+      color:var(--pri);border:2px dashed #c5cae9;border-radius:11px;
+      font-size:.82rem;font-weight:600;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;gap:6px;
+      transition:background .15s}
+    .btn-upload:hover{background:#e8eaf6}
+    #fileInput{display:none}
 
-    /* ── Result ── */
-    .result-card{background:var(--card);border-radius:18px;overflow:hidden;
+    /* result */
+    .res{background:var(--card);border-radius:17px;overflow:hidden;
       box-shadow:0 4px 20px rgba(0,0,0,.09);display:none;
       animation:up .4s cubic-bezier(.34,1.56,.64,1)}
-    .result-card.show{display:block}
-    @keyframes up{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:translateY(0)}}
+    .res.show{display:block}
+    @keyframes up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
 
-    .res-header{background:linear-gradient(135deg,#2e7d32,#43a047);
-      color:#fff;padding:18px 20px;display:flex;align-items:center;gap:12px}
-    .res-icon{width:46px;height:46px;background:rgba(255,255,255,.2);border-radius:50%;
-      display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
-    .res-header h2{font-size:1rem;font-weight:700}
-    .res-header p{font-size:.75rem;opacity:.85;margin-top:2px}
+    .rh{padding:16px 18px;display:flex;align-items:center;gap:11px;color:#fff}
+    .rh.xml{background:linear-gradient(135deg,#2e7d32,#43a047)}
+    .rh.bin{background:linear-gradient(135deg,#e65100,#ef6c00)}
+    .rico{width:42px;height:42px;background:rgba(255,255,255,.2);border-radius:50%;
+      display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0}
+    .rh h2{font-size:.95rem;font-weight:700}
+    .rh p{font-size:.7rem;opacity:.85;margin-top:1px}
 
-    .uid-row{background:#f8f9ff;border-bottom:1px solid var(--border);padding:14px 20px}
-    .uid-row label{font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.8px}
-    .uid-digits{font-size:1.25rem;font-weight:700;letter-spacing:4px;
-      color:var(--primary);font-family:'Courier New',monospace;margin-top:4px}
-    .uid-mask{color:var(--muted)}
+    .uid-row{background:#f8f9ff;border-bottom:1px solid var(--bdr);padding:12px 18px}
+    .uid-row label{font-size:.64rem;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.8px}
+    .uid-dig{font-size:1.15rem;font-weight:700;letter-spacing:4px;
+      color:var(--pri);font-family:'Courier New',monospace;margin-top:3px}
+    .um{color:var(--dim)}
 
-    .section{padding:0 18px}
-    .sec-title{font-size:.67rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;
-      color:var(--primary);padding:14px 0 9px;border-bottom:2px solid #e8eaf6;
-      margin-bottom:2px;display:flex;align-items:center;gap:7px}
-    .sec-title svg{width:15px;height:15px}
+    .sec{padding:0 16px}
+    .sec-t{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+      color:var(--pri);padding:12px 0 7px;border-bottom:2px solid #e8eaf6;
+      margin-bottom:2px;display:flex;align-items:center;gap:5px}
+    .sec-t svg{width:13px;height:13px}
 
-    .frow{display:flex;padding:8px 0;border-bottom:1px solid #f3f4f6;gap:10px}
-    .frow:last-child{border-bottom:none}
-    .fkey{font-size:.7rem;color:var(--muted);font-weight:500;min-width:115px;flex-shrink:0;padding-top:1px}
-    .fval{font-size:.82rem;font-weight:600;color:var(--text);word-break:break-word}
-    .fval.empty{color:var(--muted);font-weight:400;font-style:italic}
+    .fr{display:flex;padding:7px 0;border-bottom:1px solid #f3f4f6;gap:8px}
+    .fr:last-child{border-bottom:none}
+    .fk{font-size:.67rem;color:var(--dim);font-weight:500;min-width:108px;flex-shrink:0;padding-top:1px}
+    .fv{font-size:.79rem;font-weight:600;color:var(--txt);word-break:break-word}
+    .fv.na{color:var(--dim);font-weight:400;font-style:italic}
 
-    .gbadge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.72rem;font-weight:700}
+    .gb{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.69rem;font-weight:700}
     .gM{background:#dbeafe;color:#1d4ed8}
     .gF{background:#fce7f3;color:#be185d}
     .gT{background:#f3e8ff;color:#7c3aed}
 
-    .raw-toggle{margin:10px 18px 0;padding:9px 13px;background:#f8f9ff;
-      border:1px solid #e8eaf6;border-radius:9px;cursor:pointer;
-      font-size:.75rem;color:var(--primary);font-weight:600;
-      display:flex;align-items:center;justify-content:space-between;user-select:none}
-    .raw-pre{margin:0 18px;background:#1e293b;border-radius:9px;padding:12px;
-      font-family:'Courier New',monospace;font-size:.65rem;color:#94a3b8;
-      overflow-x:auto;white-space:pre;display:none;line-height:1.6;margin-top:6px}
-    .raw-pre.show{display:block}
-    .xt{color:#7dd3fc}.xa{color:#86efac}.xv{color:#fde68a}
+    .fmt-pill{display:inline-block;font-size:.62rem;font-weight:700;
+      padding:2px 7px;border-radius:20px;margin-left:7px;vertical-align:middle}
+    .fp-xml{background:#c8e6c9;color:#1b5e20}
+    .fp-bin{background:#ffe0b2;color:#bf360c}
 
-    .btn-again{display:block;width:calc(100% - 36px);margin:12px 18px 18px;
-      padding:12px;background:var(--primary);color:#fff;border:none;border-radius:11px;
-      font-size:.88rem;font-weight:700;cursor:pointer;transition:background .2s;text-align:center}
+    .raw-toggle{margin:9px 16px 0;padding:8px 11px;background:#f8f9ff;
+      border:1px solid #e8eaf6;border-radius:8px;cursor:pointer;
+      font-size:.71rem;color:var(--pri);font-weight:600;
+      display:flex;align-items:center;justify-content:space-between;user-select:none}
+    .raw-pre{margin:5px 16px 0;background:#1e293b;border-radius:8px;padding:11px;
+      font-family:'Courier New',monospace;font-size:.6rem;color:#94a3b8;
+      overflow-x:auto;white-space:pre-wrap;word-break:break-all;
+      display:none;line-height:1.6;max-height:180px}
+    .raw-pre.show{display:block}
+    .xt{color:#7dd3fc}.xa{color:#86efac}.xv{color:#fde68a}.xc{color:#fb923c}
+
+    /* debug panel */
+    .dbg{margin:9px 16px 0;padding:10px 12px;background:#1e293b;border-radius:8px;
+      font-family:'Courier New',monospace;font-size:.6rem;color:#94a3b8;
+      line-height:1.7;display:none;max-height:200px;overflow-y:auto}
+    .dbg.show{display:block}
+    .dbg .dg-ok{color:#86efac}.dbg .dg-err{color:#fca5a5}.dbg .dg-inf{color:#7dd3fc}
+
+    .btn-again{display:block;width:calc(100% - 32px);margin:10px 16px 16px;
+      padding:11px;background:var(--pri);color:#fff;border:none;border-radius:10px;
+      font-size:.84rem;font-weight:700;cursor:pointer;transition:background .2s;text-align:center}
     .btn-again:hover{background:#283593}
 
-    /* ── Algo panel ── */
-    .algo-panel{background:var(--card);border-radius:16px;padding:18px;
-      margin-top:18px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
-    .algo-panel h3{font-size:.88rem;font-weight:700;color:var(--primary);
-      margin-bottom:13px;display:flex;align-items:center;gap:7px}
-    .astep{display:flex;gap:11px;margin-bottom:11px}
-    .anum{width:24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;
-      font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;
+    .algo{background:var(--card);border-radius:16px;padding:16px;
+      margin-top:15px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+    .algo h3{font-size:.84rem;font-weight:700;color:var(--pri);
+      margin-bottom:11px;display:flex;align-items:center;gap:6px}
+    .as{display:flex;gap:9px;margin-bottom:9px}
+    .an{width:22px;height:22px;border-radius:50%;background:var(--pri);color:#fff;
+      font-size:.67rem;font-weight:700;display:flex;align-items:center;justify-content:center;
       flex-shrink:0;margin-top:1px}
-    .atxt{font-size:.78rem;color:var(--text);line-height:1.55}
-    .atxt strong{color:var(--primary)}
-    .atxt code{background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:.72rem;font-family:'Courier New',monospace;color:#374151}
+    .at{font-size:.74rem;color:var(--txt);line-height:1.55}
+    .at strong{color:var(--pri)}
+    .at code{background:#f3f4f6;padding:1px 4px;border-radius:3px;
+      font-size:.69rem;font-family:'Courier New',monospace;color:#374151}
   </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="header-logo">🪪</div>
+<div class="hdr">
+  <div class="hdr-ico">🪪</div>
   <div>
     <h1>Aadhaar QR Code Scanner</h1>
-    <p>Scan Aadhaar card QR code to extract all details</p>
+    <p>Camera scan + image upload · Old XML &amp; New Secure QR formats</p>
   </div>
 </div>
 
-<div class="algo-strip">
-  <strong>Algorithm:</strong>
-  <span class="badge">QR ISO 18004</span>
-  <span class="badge">Reed-Solomon ECC</span>
-  <span class="badge">jsQR Decoder</span>
-  <span class="badge">XML DOMParser</span>
-  <span class="badge">PrintLetterBarcodeData</span>
+<div class="strip">
+  <span class="bge">Old XML</span>
+  <span class="bge r">New Secure QR (BigInt decode)</span>
+  <span class="bge r">Binary Byte-mode</span>
+  &nbsp;·&nbsp;
+  <span class="bge">jsQR + 0xFF split + DOMParser</span>
 </div>
 
-<div class="container">
+<div class="wrap">
 
   <div class="msg err" id="msgErr">
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
@@ -280,132 +273,154 @@
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
     <span id="infTxt"></span>
   </div>
+  <div class="msg warn" id="msgWarn">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+    <span id="warnTxt"></span>
+  </div>
 
   <!-- Scanner card -->
   <div class="card" id="scanCard">
-    <div class="viewport" id="vp">
+    <div class="vp">
       <video id="video" playsinline muted autoplay></video>
       <canvas id="canvas"></canvas>
-      <div class="dim"></div>
-      <div class="frame-wrap">
-        <div class="scan-frame">
-          <div class="scan-line"></div>
+      <div class="dimov"></div>
+      <div class="fw">
+        <div class="sf">
+          <div class="sl"></div>
           <div class="br"></div><div class="bl"></div>
         </div>
       </div>
-      <div class="flash-success" id="flash"></div>
-      <div class="scan-status" id="status">Press "Start Scanning" to begin</div>
+      <div class="okflash" id="flash"></div>
+      <div class="fmttag" id="fmttag"></div>
+      <div class="stat" id="stat">Press Start Scanning or upload an image</div>
     </div>
 
-    <div class="controls">
-      <button class="ctrl" id="btnFlash" onclick="toggleFlash()">
+    <div class="ctrls">
+      <button class="cb" id="btnFlash" onclick="toggleFlash()">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>
         <span id="flashLbl">Flash</span>
       </button>
-      <div class="cdiv"></div>
-      <button class="ctrl on" id="btnFocus" onclick="toggleFocus()">
+      <div class="cdv"></div>
+      <button class="cb on" id="btnFocus" onclick="toggleFocus()">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm-7 7H3v4h4v-2H5v-2zm14 0v2h-2v2h4v-4h-2zM5 5h2V3H3v4h2V5zm11-2v2h2v2h2V3h-4z"/></svg>
         <span>Autofocus</span>
       </button>
-      <div class="cdiv"></div>
-      <button class="ctrl" onclick="stopCamera(true)">
+      <div class="cdv"></div>
+      <button class="cb" onclick="stopCamera(true)">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         <span>Close</span>
       </button>
     </div>
 
-    <div class="start-wrap">
-      <button class="btn-start" id="btnStart" onclick="startScanner()">
-        <div class="spinner" id="spin"></div>
+    <div class="sw">
+      <button class="btn" id="btnStart" onclick="startScanner()">
+        <div class="sp" id="spin"></div>
         <span id="btnTxt">📷 Start Scanning</span>
       </button>
+    </div>
+
+    <!-- Image upload (bonus feature) -->
+    <div class="upload-row">
+      <button class="btn-upload" onclick="document.getElementById('fileInput').click()">
+        🖼️ Upload QR Image / Screenshot
+      </button>
+      <input type="file" id="fileInput" accept="image/*" onchange="handleImageUpload(event)" />
     </div>
   </div>
 
   <!-- Result card -->
-  <div class="result-card" id="resCard">
-    <div class="res-header">
-      <div class="res-icon">✅</div>
+  <div class="res" id="resCard">
+    <div class="rh" id="resHdr">
+      <div class="rico" id="resIco"></div>
       <div>
-        <h2>Aadhaar Details Extracted</h2>
+        <h2 id="resTitle"></h2>
         <p id="resTime"></p>
       </div>
     </div>
 
     <div class="uid-row">
-      <label>Aadhaar Number (UID)</label>
-      <div class="uid-digits" id="uidDisplay"></div>
+      <label>Aadhaar / Reference ID</label>
+      <div class="uid-dig" id="uidDisp"></div>
     </div>
 
-    <div class="section">
-      <div class="sec-title">
+    <div class="sec">
+      <div class="sec-t">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
         Personal Information
       </div>
-      <div class="frow"><span class="fkey">Full Name</span><span class="fval" id="fName"></span></div>
-      <div class="frow"><span class="fkey">Gender</span><span class="fval" id="fGender"></span></div>
-      <div class="frow"><span class="fkey">Date of Birth</span><span class="fval" id="fDob"></span></div>
-      <div class="frow"><span class="fkey">Year of Birth</span><span class="fval" id="fYob"></span></div>
-      <div class="frow"><span class="fkey">Care Of</span><span class="fval" id="fCo"></span></div>
+      <div class="fr"><span class="fk">Full Name</span><span class="fv" id="fName"></span></div>
+      <div class="fr"><span class="fk">Gender</span><span class="fv" id="fGender"></span></div>
+      <div class="fr"><span class="fk">Date of Birth</span><span class="fv" id="fDob"></span></div>
+      <div class="fr"><span class="fk">Year of Birth</span><span class="fv" id="fYob"></span></div>
+      <div class="fr"><span class="fk">Care Of</span><span class="fv" id="fCo"></span></div>
     </div>
 
-    <div class="section">
-      <div class="sec-title">
+    <div class="sec">
+      <div class="sec-t">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
         Address
       </div>
-      <div class="frow"><span class="fkey">House / Flat</span><span class="fval" id="fHouse"></span></div>
-      <div class="frow"><span class="fkey">Street</span><span class="fval" id="fStreet"></span></div>
-      <div class="frow"><span class="fkey">Landmark</span><span class="fval" id="fLm"></span></div>
-      <div class="frow"><span class="fkey">Locality</span><span class="fval" id="fLoc"></span></div>
-      <div class="frow"><span class="fkey">Village/Town/City</span><span class="fval" id="fVtc"></span></div>
-      <div class="frow"><span class="fkey">Post Office</span><span class="fval" id="fPo"></span></div>
-      <div class="frow"><span class="fkey">Sub-District</span><span class="fval" id="fSd"></span></div>
-      <div class="frow"><span class="fkey">District</span><span class="fval" id="fDist"></span></div>
-      <div class="frow"><span class="fkey">State</span><span class="fval" id="fState"></span></div>
-      <div class="frow"><span class="fkey">PIN Code</span><span class="fval" id="fPin"></span></div>
-      <div class="frow"><span class="fkey">Country</span><span class="fval" id="fCountry"></span></div>
+      <div class="fr"><span class="fk">House / Flat</span><span class="fv" id="fHouse"></span></div>
+      <div class="fr"><span class="fk">Street</span><span class="fv" id="fStreet"></span></div>
+      <div class="fr"><span class="fk">Landmark</span><span class="fv" id="fLm"></span></div>
+      <div class="fr"><span class="fk">Locality</span><span class="fv" id="fLoc"></span></div>
+      <div class="fr"><span class="fk">Village/Town/City</span><span class="fv" id="fVtc"></span></div>
+      <div class="fr"><span class="fk">Post Office</span><span class="fv" id="fPo"></span></div>
+      <div class="fr"><span class="fk">Sub-District</span><span class="fv" id="fSd"></span></div>
+      <div class="fr"><span class="fk">District</span><span class="fv" id="fDist"></span></div>
+      <div class="fr"><span class="fk">State</span><span class="fv" id="fState"></span></div>
+      <div class="fr"><span class="fk">PIN Code</span><span class="fv" id="fPin"></span></div>
+      <div class="fr"><span class="fk">Country</span><span class="fv" id="fCountry"></span></div>
     </div>
 
-    <div style="height:10px"></div>
-    <div class="raw-toggle" onclick="toggleRaw()">
-      <span>🔍 View Raw XML (QR Payload)</span><span id="rawArrow">▼</span>
+    <div style="height:8px"></div>
+
+    <!-- Debug panel (auto-shows on parse errors) -->
+    <div class="raw-toggle" onclick="toggleDbg()">
+      <span>🔧 Debug / Raw QR Data</span><span id="dbgArr">▼</span>
+    </div>
+    <div class="dbg" id="dbgPanel"></div>
+
+    <div class="raw-toggle" style="margin-top:6px" onclick="toggleRaw()">
+      <span>📄 Raw QR Payload</span><span id="rawArr">▼</span>
     </div>
     <pre class="raw-pre" id="rawPre"></pre>
+
     <button class="btn-again" onclick="resetScanner()">🔄 Scan Another QR Code</button>
   </div>
 
   <!-- Algorithm panel -->
-  <div class="algo-panel">
-    <h3>⚙️ How This Scanner Works (Deep Logic)</h3>
+  <div class="algo">
+    <h3>⚙️ Aadhaar QR Formats &amp; Algorithm</h3>
 
-    <div class="astep"><div class="anum">1</div>
-      <div class="atxt"><strong>Camera via MediaDevices API</strong><br>
-        Requests rear camera (<code>facingMode:"environment"</code>), streams to &lt;video&gt;. Frames drawn to &lt;canvas&gt; for processing. Android used Google Mobile Vision <code>BarcodeCapture</code> fragment.</div>
+    <div class="as"><div class="an">A</div>
+      <div class="at"><strong>Old XML Format (pre-2019)</strong><br>
+        QR stores raw XML. <code>DOMParser("text/xml")</code> → find
+        <code>PrintLetterBarcodeData</code> root → extract 17 attributes.
+        Validation: root element exists AND <code>uid</code> attribute present.</div>
     </div>
 
-    <div class="astep"><div class="anum">2</div>
-      <div class="atxt"><strong>QR Decoding — jsQR (Reed-Solomon Algorithm)</strong><br>
-        Each canvas frame is passed as <code>ImageData</code> to <code>jsQR(data, width, height)</code>.
-        jsQR finds the 3 finder patterns, reads timing/alignment grids, applies Reed-Solomon ECC (Level M = 15% error recovery), and decodes the raw byte string.</div>
+    <div class="as"><div class="an">B</div>
+      <div class="at"><strong>New Secure QR — Numeric Mode (most modern cards)</strong><br>
+        QR uses NUMERIC encoding → stores a very long decimal number (100+ digits).
+        <code>jsQR</code> gives this as a digit string in <code>code.data</code>.
+        Convert: <code>BigInt(str) → big-endian byte array → split by 0xFF byte</code>.
+        Fields (0xFF-delimited): seg[0]=header, seg[1]=Name, seg[2]=DOB, seg[3]=Gender,
+        seg[4]=CareOf, seg[5]=District, seg[6]=Landmark, seg[7]=House, seg[8]=Locality,
+        seg[9]=PIN, seg[10]=PostOffice, seg[11]=State, seg[12]=Street,
+        seg[13]=SubDist, seg[14]=VTC.</div>
     </div>
 
-    <div class="astep"><div class="anum">3</div>
-      <div class="atxt"><strong>XML Parsing — The Core Aadhaar Logic</strong><br>
-        The QR raw value is <strong>XML</strong>. Parsed with <code>DOMParser("text/xml")</code>.
-        Validates: (1) root element = <code>PrintLetterBarcodeData</code>, (2) attribute <code>uid</code> exists.
-        Android used <code>org.json.XML.toJSONObject(rawValue)</code> + <code>JSONObject.has()</code>.</div>
+    <div class="as"><div class="an">C</div>
+      <div class="at"><strong>New Secure QR — Byte Mode</strong><br>
+        QR uses BYTE encoding → <code>code.binaryData</code> contains actual raw bytes.
+        Same 0xFF-split algorithm as Format B applied directly to <code>binaryData</code>.</div>
     </div>
 
-    <div class="astep"><div class="anum">4</div>
-      <div class="atxt"><strong>17-Field Extraction (UidModel)</strong><br>
-        All fields read via <code>getAttribute()</code>: uid, name, gender, yob, dob, co, house, street, lm, loc, vtc, po, dist, subdist, state, pc, country.
-        Gender: <code>M</code>=Male, <code>F</code>=Female, <code>T</code>=Transgender.</div>
-    </div>
-
-    <div class="astep"><div class="anum">5</div>
-      <div class="atxt"><strong>Display &amp; Privacy</strong><br>
-        Aadhaar number masked as <strong>✱✱✱✱ ✱✱✱✱ XXXX</strong> (last 4 visible). All 17 address/personal fields shown in structured card. Raw XML viewable for debugging.</div>
+    <div class="as"><div class="an">D</div>
+      <div class="at"><strong>Upload Image Support</strong><br>
+        Image drawn to <code>&lt;canvas&gt;</code> → <code>jsQR(imageData)</code> decodes QR →
+        same parsing pipeline. Works with photos of Aadhaar card or screenshots.</div>
     </div>
   </div>
 
@@ -414,366 +429,552 @@
 <script>
 /*
  * ══════════════════════════════════════════════════════════════════
- * AADHAAR QR SCANNER — JavaScript port of AcqsActivity.java
+ * AADHAAR QR SCANNER — handles 3 real-world formats
  *
- * KEY ALGORITHM (mirrors onRetrieved() callback):
- *   1. jsQR(imageData, w, h) → decoded QR string (XML)
- *   2. DOMParser.parseFromString(xml, "text/xml")
- *   3. Check root element = "PrintLetterBarcodeData"
- *   4. Check getAttribute("uid") exists
- *   5. Extract 17 fields → display
+ * Key fix: New Aadhaar QRs use NUMERIC mode → jsQR gives decimal
+ * string → must do BigInt(str) → bytes → split by 0xFF
  * ══════════════════════════════════════════════════════════════════
  */
 
-// ── State ─────────────────────────────────────────────────────────
-let stream    = null;
-let scanning  = false;
-let rafId     = null;
-let flashOn   = false;
-let afOn      = true;
-let vTrack    = null;
-let rawOpen   = false;
+let stream = null, scanning = false, rafId = null;
+let flashOn = false, afOn = true, vTrack = null;
+let rawOpen = false, dbgOpen = false;
 
-// ── DOM refs ──────────────────────────────────────────────────────
 const video   = document.getElementById('video');
 const canvas  = document.getElementById('canvas');
 const ctx     = canvas.getContext('2d', { willReadFrequently: true });
-const statusEl = document.getElementById('status');
-const flashEl  = document.getElementById('flash');
+const statEl  = document.getElementById('stat');
+const flashEl = document.getElementById('flash');
+const fmtTag  = document.getElementById('fmttag');
 
-// ── Verify jsQR loaded ────────────────────────────────────────────
 window.addEventListener('load', () => {
-  if (typeof jsQR === 'undefined') {
-    showErr('QR decoder (jsQR) failed to load. Check your internet connection and refresh the page.');
-  }
+  if (typeof jsQR === 'undefined')
+    showErr('jsQR library failed to load. Check your internet and refresh.');
 });
 
-// ── Start Scanner ─────────────────────────────────────────────────
+// ─── Camera ───────────────────────────────────────────────────────
 async function startScanner() {
   if (scanning) return;
-  hideMsg();
-  setLoading(true);
-
+  hideMsg(); setLoading(true);
   try {
-    // Request rear-facing camera
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
-
     vTrack = stream.getVideoTracks()[0];
     scanning = true;
-    statusEl.textContent = 'Point at Aadhaar QR Code';
-    setLoading(false);
-    setBtnScanning(true);
-    tick(); // start frame loop
-
+    statEl.textContent = 'Point at Aadhaar QR Code';
+    setLoading(false); setBtnState('scanning');
+    tick();
   } catch (err) {
     setLoading(false);
     if (err.name === 'NotAllowedError')
-      showErr('Camera permission denied. Please allow camera access and try again.');
+      showErr('Camera permission denied. Please allow camera access and retry.');
     else if (err.name === 'NotFoundError')
-      showErr('No camera found on this device.');
+      showErr('No camera detected. Try uploading an image instead.');
     else
       showErr('Camera error: ' + err.message);
   }
 }
 
-// ── Frame Loop ───────────────────────────────────────────────────
-/*
- * Captures frames from the video stream and calls jsQR() on each.
- * jsQR implements the full QR decoding pipeline:
- *   - Binarization (convert RGB → black/white)
- *   - Finder pattern detection (3 corner squares)
- *   - Timing & alignment grid extraction
- *   - Reed-Solomon error correction
- *   - Data decoding (Byte mode for Aadhaar XML)
- *
- * Android equivalent: Google Vision Detector running on camera frames,
- * triggers onRetrieved(Barcode) when a QR code is found.
- *
- * setSupportMultipleScan(false) → we stop after first successful decode.
- */
+// ─── Frame loop ───────────────────────────────────────────────────
 function tick() {
   if (!scanning) return;
-
   if (video.readyState === video.HAVE_ENOUGH_DATA) {
     canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    // jsQR: pass raw pixel data (RGBA Uint8ClampedArray), width, height
-    // Returns null if no QR found (normal — just keep looping)
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert'  // faster; Aadhaar QRs are dark-on-light
-    });
-
-    if (code && code.data) {
-      // QR found — run Aadhaar XML parse logic
-      onQRDetected(code.data);
-      return; // stop loop
-    }
+    processFrame();
   }
-
   rafId = requestAnimationFrame(tick);
 }
 
-// ── Core Aadhaar QR Logic ─────────────────────────────────────────
-/*
- * Mirrors AcqsActivity.java onRetrieved(final Barcode barcode):
- *
- *   String rawValue = barcode.rawValue;
- *   JSONObject object = XML.toJSONObject(rawValue);            // → DOMParser
- *   if (object.has("PrintLetterBarcodeData")) {               // → querySelector
- *     JSONObject data = object.getJSONObject("PrintLetterBarcodeData");
- *     if (data.has("uid")) {                                  // → getAttribute
- *       // extract all 17 fields...
- *       setResult(RESULT_OK, intent); finish();               // → displayResult()
- *     } else { showSnackBar("Invalid QR format"); }
- *   } else { showSnackBar("Invalid QR format"); }
- */
-function onQRDetected(rawValue) {
-  scanning = false;
-  cancelAnimationFrame(rafId);
+function processFrame() {
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  // attemptBoth: tries normal + inverted QR (handles screen-displayed QRs too)
+  const code = jsQR(imgData.data, imgData.width, imgData.height, {
+    inversionAttempts: 'attemptBoth'
+  });
+  if (code) {
+    scanning = false;
+    cancelAnimationFrame(rafId);
+    flashEl.classList.add('on');
+    setTimeout(() => flashEl.classList.remove('on'), 400);
+    statEl.textContent = '✅ QR Found! Parsing…';
+    parseQR(code.data, code.binaryData);
+  }
+}
 
-  // Success flash (green overlay)
-  flashEl.classList.add('on');
-  setTimeout(() => flashEl.classList.remove('on'), 350);
-  statusEl.textContent = '✅ QR Detected! Parsing…';
+// ─── Image upload ─────────────────────────────────────────────────
+function handleImageUpload(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  hideMsg(); stopCamera(false);
+  statEl.textContent = '🖼️ Processing image…';
 
-  // ── VALIDATION #1: Parse XML ──────────────────────────────────
-  let doc, el;
-  try {
-    const parser = new DOMParser();
-    doc = parser.parseFromString(rawValue, 'text/xml');
-
-    // Check for parse error node
-    if (doc.querySelector('parsererror')) {
-      onInvalidQR('Not valid XML — not an Aadhaar QR'); return;
+  const img = new Image();
+  img.onload = () => {
+    canvas.width  = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imgData.data, imgData.width, imgData.height, {
+      inversionAttempts: 'attemptBoth'
+    });
+    if (code) {
+      flashEl.classList.add('on');
+      setTimeout(() => flashEl.classList.remove('on'), 400);
+      parseQR(code.data, code.binaryData);
+    } else {
+      statEl.textContent = 'No QR code found in image';
+      showWarn('No QR code detected in the uploaded image. Make sure the QR is clearly visible and try again.');
+      setBtnState('idle');
     }
+  };
+  img.onerror = () => showErr('Could not load the image file.');
+  img.src = URL.createObjectURL(file);
+  evt.target.value = '';
+}
 
-    // ── VALIDATION #1: root element = PrintLetterBarcodeData ──
-    // Android: object.has("PrintLetterBarcodeData")
-    el = doc.querySelector('PrintLetterBarcodeData');
-    if (!el) {
-      onInvalidQR('Not an Aadhaar QR code (PrintLetterBarcodeData missing)'); return;
+// ══════════════════════════════════════════════════════════════════
+// MAIN PARSER — tries all formats in order
+// ══════════════════════════════════════════════════════════════════
+const dbgLines = [];
+
+function parseQR(rawStr, binaryData) {
+  dbgLines.length = 0;
+  dbg('inf', 'QR detected. Starting format detection…');
+  dbg('inf', `data length: ${(rawStr||'').length} chars | binaryData: ${binaryData ? binaryData.length : 0} bytes`);
+  dbg('inf', `data preview: ${(rawStr||'').slice(0,80)}`);
+
+  // ── FORMAT A: Old XML ──────────────────────────────────────────
+  dbg('inf', '--- Trying Format A: Old XML ---');
+  if (tryXml(rawStr)) return;
+
+  // ── FORMAT B: Numeric-mode — BigInt → bytes ────────────────────
+  // New Aadhaar QRs use NUMERIC encoding. jsQR returns the decimal
+  // string in code.data. We convert it to bytes via BigInt.
+  dbg('inf', '--- Trying Format B: Numeric BigInt decode ---');
+  if (/^\d+$/.test((rawStr || '').trim()) && rawStr.length > 20) {
+    dbg('ok', `Numeric string detected (${rawStr.length} digits). Converting via BigInt…`);
+    const bytes = bigIntToBytes(rawStr.trim());
+    if (bytes) {
+      dbg('ok', `BigInt → ${bytes.length} bytes. First 8: ${Array.from(bytes.slice(0,8)).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+      if (tryBinary(bytes, 'NUM')) return;
     }
-
-    // ── VALIDATION #2: uid attribute must exist ────────────────
-    // Android: printLetterBarcodeData.has("uid")
-    const uid = el.getAttribute('uid');
-    if (!uid) {
-      onInvalidQR('Invalid QR: uid attribute missing'); return;
-    }
-
-  } catch (e) {
-    onInvalidQR('XML parse error: ' + e.message); return;
+  } else {
+    dbg('inf', 'Not a numeric string — skipping BigInt decode');
   }
 
-  // ── EXTRACT ALL 17 FIELDS (UidModel.java) ─────────────────────
-  const f = {
-    uid:     g(el, 'uid'),       // AADHARNUMBER
-    name:    g(el, 'name'),      // FULLNAME
-    gender:  g(el, 'gender'),    // GENDER (M/F/T)
-    yob:     g(el, 'yob'),       // YEAROFBIRTH
-    dob:     g(el, 'dob'),       // DATEOFBIRTH
-    co:      g(el, 'co'),        // CAREOF
-    house:   g(el, 'house'),     // HOUSE
-    street:  g(el, 'street'),    // STREET
-    lm:      g(el, 'lm'),        // LANDMARK
-    loc:     g(el, 'loc'),       // LOCALITY
-    vtc:     g(el, 'vtc'),       // VILLAGETOWNCITY
-    po:      g(el, 'po'),        // POSTOFFICE
-    dist:    g(el, 'dist'),      // DISTRICT
-    subdist: g(el, 'subdist'),   // SUBDISTRICT
-    state:   g(el, 'state'),     // STATE
-    pc:      g(el, 'pc'),        // POSTALCODE
-    country: g(el, 'country'),   // COUNTRY
-  };
+  // ── FORMAT C: Byte-mode — use binaryData directly ─────────────
+  dbg('inf', '--- Trying Format C: Byte-mode binaryData ---');
+  if (binaryData && binaryData.length > 20) {
+    const arr = Array.isArray(binaryData) ? binaryData : Array.from(binaryData);
+    dbg('inf', `binaryData length: ${arr.length}. First 8: ${arr.slice(0,8).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+    if (tryBinary(arr, 'BIN')) return;
+  }
 
-  displayResult(f, rawValue);
+  // ── Fallback: regex on raw string ─────────────────────────────
+  dbg('inf', '--- Trying regex fallback ---');
+  if (tryRegex(rawStr)) return;
+
+  // ── Nothing worked ────────────────────────────────────────────
+  dbg('err', 'All formats failed. Showing raw data.');
+  showWarn('QR code read successfully but could not match any Aadhaar format. Check the debug panel below.');
+  // Show result card with empty fields + debug info
+  renderResult({}, 'bin', escHtml(rawStr || '[empty]'), true);
 }
 
-// getAttribute helper
-function g(el, attr) { return el.getAttribute(attr) || ''; }
+// ══════════════════════════════════════════════════════════════════
+// FORMAT A: Old XML — PrintLetterBarcodeData
+// ══════════════════════════════════════════════════════════════════
+function tryXml(raw) {
+  if (!raw) return false;
+  if (!raw.includes('PrintLetterBarcodeData') && !raw.trim().startsWith('<')) {
+    dbg('inf', 'No XML indicators in data');
+    return false;
+  }
+  try {
+    let xmlStr = raw.trim();
+    // Find the PrintLetterBarcodeData element even if there's preamble
+    const idx = xmlStr.indexOf('<PrintLetterBarcodeData');
+    if (idx > 0) xmlStr = xmlStr.slice(idx);
+    if (idx < 0 && !xmlStr.startsWith('<')) { dbg('err', 'No XML root found'); return false; }
 
-// ── Invalid QR handler ────────────────────────────────────────────
-function onInvalidQR(msg) {
-  statusEl.textContent = '⚠ ' + msg;
-  // Resume scanning after 2s (Android: resumeBarcodeScanner())
-  setTimeout(() => {
-    if (!scanning) {
-      scanning = true;
-      statusEl.textContent = 'Point at Aadhaar QR Code';
-      tick();
+    const parser = new DOMParser();
+    let doc = parser.parseFromString(xmlStr, 'text/xml');
+    if (doc.querySelector('parsererror')) {
+      dbg('err', 'DOMParser failed: ' + doc.querySelector('parsererror').textContent.slice(0,80));
+      return false;
     }
-  }, 2000);
+    const el = doc.querySelector('PrintLetterBarcodeData');
+    if (!el) { dbg('err', 'PrintLetterBarcodeData element not found'); return false; }
+    const uid = el.getAttribute('uid');
+    if (!uid) { dbg('err', 'uid attribute missing'); return false; }
+
+    dbg('ok', `Format A matched! uid=${uid}, name=${el.getAttribute('name')}`);
+
+    const f = {
+      uid:     ga(el,'uid'),     name:    ga(el,'name'),
+      gender:  ga(el,'gender'),  yob:     ga(el,'yob'),
+      dob:     ga(el,'dob'),     co:      ga(el,'co'),
+      house:   ga(el,'house'),   street:  ga(el,'street'),
+      lm:      ga(el,'lm'),      loc:     ga(el,'loc'),
+      vtc:     ga(el,'vtc'),     po:      ga(el,'po'),
+      dist:    ga(el,'dist'),    subdist: ga(el,'subdist'),
+      state:   ga(el,'state'),   pc:      ga(el,'pc'),
+      country: ga(el,'country'),
+    };
+    renderResult(f, 'xml', hlXml(raw));
+    return true;
+  } catch(e) {
+    dbg('err', 'XML exception: ' + e.message);
+    return false;
+  }
+}
+function ga(el, a) { return (el.getAttribute(a)||'').trim(); }
+
+// ══════════════════════════════════════════════════════════════════
+// BigInt decimal string → big-endian Uint8Array
+// This is the KEY algorithm for new Aadhaar QRs (numeric-mode)
+// UIDAI encodes the binary payload as a decimal integer in the QR.
+// BigInt(decimalStr) reconstructs the original byte sequence.
+// ══════════════════════════════════════════════════════════════════
+function bigIntToBytes(numStr) {
+  try {
+    let n = BigInt(numStr);
+    if (n === 0n) return new Uint8Array([0]);
+    const bytes = [];
+    while (n > 0n) {
+      bytes.unshift(Number(n & 0xFFn));
+      n >>= 8n;
+    }
+    return new Uint8Array(bytes);
+  } catch(e) {
+    dbg('err', 'BigInt conversion failed: ' + e.message);
+    return null;
+  }
 }
 
-// ── Display Result ────────────────────────────────────────────────
-function displayResult(f, rawXml) {
+// ══════════════════════════════════════════════════════════════════
+// FORMAT B/C: Binary payload — split by 0xFF delimiter
+//
+// UIDAI Secure QR byte structure:
+//   Byte 0     : Email+Mobile present indicator
+//   Bytes 1-N  : Reference ID (last 4 of UID + timestamp)
+//   [0xFF]
+//   Name [0xFF] DOB [0xFF] Gender [0xFF] CareOf [0xFF]
+//   District [0xFF] Landmark [0xFF] House [0xFF] Location [0xFF]
+//   Pincode [0xFF] PostOffice [0xFF] State [0xFF] Street [0xFF]
+//   SubDistrict [0xFF] VTC [0xFF]
+//   <32-byte phone hash><32-byte email hash><JPEG photo><RSA sig>
+// ══════════════════════════════════════════════════════════════════
+function tryBinary(bytes, tag) {
+  try {
+    const dec = new TextDecoder('utf-8', { fatal: false });
+
+    // Split by 0xFF
+    const segs = [];
+    let cur = [];
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0xFF) {
+        segs.push(dec.decode(new Uint8Array(cur)));
+        cur = [];
+      } else {
+        cur.push(bytes[i]);
+      }
+    }
+    if (cur.length) segs.push(dec.decode(new Uint8Array(cur)));
+
+    dbg('inf', `[${tag}] Split by 0xFF → ${segs.length} segments`);
+    segs.slice(0, 16).forEach((s, i) => {
+      const clean = s.replace(/[\x00-\x1f\x7f]/g, '·');
+      dbg('inf', `  seg[${i}] (${s.length}b): ${clean.slice(0,60)}`);
+    });
+
+    if (segs.length < 5) {
+      dbg('err', `Too few segments (${segs.length}) — not a valid Aadhaar Secure QR`);
+      return false;
+    }
+
+    // Segment 0 = binary header (email+mobile indicator + ref ID)
+    // The ref ID is the printable part at the end of seg[0]
+    const seg0 = segs[0] || '';
+    let refId = '';
+    // Find last run of printable ASCII in seg[0]
+    for (let i = seg0.length - 1; i >= 0; i--) {
+      const c = seg0.charCodeAt(i);
+      if (c >= 0x20 && c <= 0x7E) refId = seg0[i] + refId;
+      else if (refId.length > 0) break;
+    }
+
+    // Extract text fields — seg[1] = Name, seg[2] = DOB, etc.
+    const name    = cleanText(segs[1]);
+    const dob     = cleanText(segs[2]);
+    const gender  = cleanText(segs[3]);
+    const co      = cleanText(segs[4]);
+    const dist    = cleanText(segs[5]);
+    const lm      = cleanText(segs[6]);
+    const house   = cleanText(segs[7]);
+    const loc     = cleanText(segs[8]);
+    const pc      = cleanText(segs[9]);
+    const po      = cleanText(segs[10]);
+    const state   = cleanText(segs[11]);
+    const street  = cleanText(segs[12]);
+    const subdist = cleanText(segs[13]);
+    const vtc     = cleanText(segs[14]);
+
+    // Validation: at least name should be non-empty readable text
+    if (!name) {
+      dbg('err', `[${tag}] Name field (seg[1]) is empty after cleaning — format mismatch`);
+      // Try alternate layout: some versions have an extra header segment
+      return tryBinaryAlt(segs, tag);
+    }
+
+    let yob = '';
+    if (dob) {
+      const parts = dob.split(/[-\/\.]/);
+      yob = parts.length === 3 ? parts[2] : (parts[0].length === 4 ? parts[0] : '');
+    }
+
+    dbg('ok', `[${tag}] Binary parse success! name=${name}, dob=${dob}, gender=${gender}`);
+
+    const f = {
+      uid: refId || (segs[0] || '').slice(-8),
+      name, dob, gender, yob, co,
+      house, street, lm, loc, vtc,
+      po, dist, subdist, state, pc,
+      country: 'India'
+    };
+
+    const rawDisp = buildBinaryDisplay(segs, bytes, tag);
+    renderResult(f, 'bin', rawDisp);
+    return true;
+  } catch(e) {
+    dbg('err', `[${tag}] Exception: ` + e.message);
+    return false;
+  }
+}
+
+// Alternate layout: some QRs have 2 header segments before name
+function tryBinaryAlt(segs, tag) {
+  dbg('inf', `[${tag}] Trying alternate layout (2 header segs)…`);
+  const name = cleanText(segs[2]);
+  if (!name) { dbg('err', 'Alt layout also failed'); return false; }
+
+  const dob     = cleanText(segs[3]);
+  const gender  = cleanText(segs[4]);
+  const co      = cleanText(segs[5]);
+  const dist    = cleanText(segs[6]);
+  const lm      = cleanText(segs[7]);
+  const house   = cleanText(segs[8]);
+  const loc     = cleanText(segs[9]);
+  const pc      = cleanText(segs[10]);
+  const po      = cleanText(segs[11]);
+  const state   = cleanText(segs[12]);
+  const street  = cleanText(segs[13]);
+  const subdist = cleanText(segs[14]);
+  const vtc     = cleanText(segs[15]);
+
+  let yob = '';
+  if (dob) { const p = dob.split(/[-\/\.]/); yob = p.length===3?p[2]:(p[0].length===4?p[0]:''); }
+
+  dbg('ok', `[${tag}] Alt layout success! name=${name}`);
+  const f = {
+    uid: cleanText(segs[0]) || cleanText(segs[1]) || '',
+    name, dob, gender, yob, co,
+    house, street, lm, loc, vtc,
+    po, dist, subdist, state, pc, country:'India'
+  };
+  renderResult(f, 'bin', '(alternate layout)');
+  return true;
+}
+
+function cleanText(s) {
+  if (!s) return '';
+  // Remove control characters and replacement chars, keep printable + Indian scripts
+  return s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffd]/g, '').trim();
+}
+
+// ── FORMAT D: Regex fallback ──────────────────────────────────────
+function tryRegex(raw) {
+  if (!raw || !raw.includes('uid=')) return false;
+  const pick = a => { const m = raw.match(new RegExp(a+'="([^"]*)"')); return m?m[1].trim():''; };
+  const uid = pick('uid');
+  if (!uid) return false;
+  dbg('ok', 'Regex fallback matched! uid=' + uid);
+  const f = {
+    uid, name:pick('name'), gender:pick('gender'), yob:pick('yob'), dob:pick('dob'),
+    co:pick('co'), house:pick('house'), street:pick('street'), lm:pick('lm'),
+    loc:pick('loc'), vtc:pick('vtc'), po:pick('po'), dist:pick('dist'),
+    subdist:pick('subdist'), state:pick('state'), pc:pick('pc'), country:pick('country'),
+  };
+  renderResult(f, 'xml', escHtml(raw));
+  return true;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RENDER RESULT
+// ══════════════════════════════════════════════════════════════════
+function renderResult(f, fmt, rawDisp, failed) {
   stopCamera(false);
 
+  document.getElementById('resHdr').className = 'rh ' + fmt;
+  document.getElementById('resIco').textContent = failed ? '⚠️' : (fmt==='xml' ? '✅' : '🔐');
+  document.getElementById('resTitle').innerHTML =
+    (failed ? 'Parse Failed' : (fmt==='xml' ? 'Old XML Format' : 'Secure QR Decoded')) +
+    `<span class="fmt-pill fp-${fmt}">${fmt==='xml'?'XML':'Binary'}</span>`;
   document.getElementById('resTime').textContent =
-    'Scanned at ' + new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    'At ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 
-  // Aadhaar number: mask first 8, show last 4
-  const uid = f.uid;
-  const masked = uid.length >= 4 ? uid.slice(-4) : uid;
-  document.getElementById('uidDisplay').innerHTML =
-    `<span class="uid-mask">✱✱✱✱ ✱✱✱✱ </span>${masked}`;
+  const uid = (f.uid||'').replace(/\D/g,'');
+  const last4 = uid.length>=4 ? uid.slice(-4) : (f.uid||'').slice(-4);
+  document.getElementById('uidDisp').innerHTML =
+    `<span class="um">✱✱✱✱ ✱✱✱✱ </span>${last4 || '—'}`;
 
-  // Gender with colour badge
-  const gMap = { M:'Male', F:'Female', T:'Transgender' };
-  const gEl = document.getElementById('fGender');
-  if (f.gender && gMap[f.gender]) {
-    gEl.innerHTML = `<span class="gbadge g${f.gender}">${gMap[f.gender]}</span>`;
-  } else {
-    setF(gEl, f.gender);
+  const gMap={M:'Male',F:'Female',T:'Transgender'};
+  const gEl=document.getElementById('fGender');
+  if(f.gender&&gMap[f.gender]) gEl.innerHTML=`<span class="gb g${f.gender}">${gMap[f.gender]}</span>`;
+  else setF(gEl, f.gender);
+
+  setF(document.getElementById('fName'),    f.name);
+  setF(document.getElementById('fDob'),     f.dob);
+  setF(document.getElementById('fYob'),     f.yob);
+  setF(document.getElementById('fCo'),      f.co);
+  setF(document.getElementById('fHouse'),   f.house);
+  setF(document.getElementById('fStreet'),  f.street);
+  setF(document.getElementById('fLm'),      f.lm);
+  setF(document.getElementById('fLoc'),     f.loc);
+  setF(document.getElementById('fVtc'),     f.vtc);
+  setF(document.getElementById('fPo'),      f.po);
+  setF(document.getElementById('fSd'),      f.subdist);
+  setF(document.getElementById('fDist'),    f.dist);
+  setF(document.getElementById('fState'),   f.state);
+  setF(document.getElementById('fPin'),     f.pc);
+  setF(document.getElementById('fCountry'), f.country||'India');
+
+  document.getElementById('rawPre').innerHTML = rawDisp || '';
+  document.getElementById('dbgPanel').innerHTML =
+    dbgLines.map(l=>`<span class="dg-${l.t}">${escHtml(l.m)}</span>`).join('\n');
+
+  // Auto-show debug if failed
+  if (failed || dbgLines.some(l=>l.t==='err')) {
+    document.getElementById('dbgPanel').classList.add('show');
+    document.getElementById('dbgArr').textContent='▲';
+    dbgOpen = true;
   }
 
-  // Personal fields
-  setF(document.getElementById('fName'),  f.name);
-  setF(document.getElementById('fDob'),   f.dob);
-  setF(document.getElementById('fYob'),   f.yob);
-  setF(document.getElementById('fCo'),    f.co);
-
-  // Address fields
-  setF(document.getElementById('fHouse'),  f.house);
-  setF(document.getElementById('fStreet'), f.street);
-  setF(document.getElementById('fLm'),     f.lm);
-  setF(document.getElementById('fLoc'),    f.loc);
-  setF(document.getElementById('fVtc'),    f.vtc);
-  setF(document.getElementById('fPo'),     f.po);
-  setF(document.getElementById('fSd'),     f.subdist);
-  setF(document.getElementById('fDist'),   f.dist);
-  setF(document.getElementById('fState'),  f.state);
-  setF(document.getElementById('fPin'),    f.pc);
-  setF(document.getElementById('fCountry'),f.country);
-
-  // Raw XML with syntax highlighting
-  document.getElementById('rawPre').innerHTML = hlXml(rawXml);
-
-  // Show result, hide scanner
-  document.getElementById('scanCard').style.display = 'none';
+  document.getElementById('scanCard').style.display='none';
   document.getElementById('resCard').classList.add('show');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({top:0, behavior:'smooth'});
 }
 
-// ── Field setter ──────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────
 function setF(el, val) {
-  if (val && val.trim()) {
-    el.textContent = val;
-    el.className = 'fval';
-  } else {
-    el.textContent = 'Not available';
-    el.className = 'fval empty';
-  }
+  const v=(val||'').trim();
+  if(v){el.textContent=v;el.className='fv';}
+  else{el.textContent='Not available';el.className='fv na';}
 }
-
-// ── XML syntax highlighter ────────────────────────────────────────
 function hlXml(xml) {
-  return xml
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  return escHtml(xml)
     .replace(/(&lt;\/?)([\w:]+)/g,'<span class="xt">$1$2</span>')
     .replace(/ ([\w:]+)=/g,' <span class="xa">$1</span>=')
     .replace(/="([^"]*)"/g,'="<span class="xv">$1</span>"');
 }
+function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function dbg(t, m) { dbgLines.push({t,m}); }
 
-// ── Flash toggle (Android: barcodeCapture.setShowFlash) ───────────
-async function toggleFlash() {
-  if (!vTrack) { showInf('Start scanner first to use flash.'); return; }
-  const caps = vTrack.getCapabilities ? vTrack.getCapabilities() : {};
-  if (!caps.torch) { showInf('Flash not supported on this device/browser.'); return; }
-  flashOn = !flashOn;
-  try {
-    await vTrack.applyConstraints({ advanced: [{ torch: flashOn }] });
-    document.getElementById('btnFlash').classList.toggle('on', flashOn);
-    document.getElementById('flashLbl').textContent = flashOn ? 'Flash ON' : 'Flash';
-  } catch(e) { flashOn = !flashOn; showErr('Flash toggle failed: ' + e.message); }
+function buildBinaryDisplay(segs, bytes, tag) {
+  const header = [
+    `<span class="xc">// UIDAI Secure QR — Format ${tag} (0xFF delimited)</span>`,
+    `<span class="xc">// Total bytes: ${bytes.length} | Segments: ${segs.length}</span>`,
+    `<span class="xc">// First 16 bytes: ${Array.from(bytes.slice?bytes.slice(0,16):Array.from(bytes).slice(0,16)).map(b=>b.toString(16).padStart(2,'0')).join(' ')}</span>`,
+    ''
+  ];
+  const segLines = segs.slice(0,16).map((s,i)=>{
+    const c = s.replace(/[\x00-\x1f\x7f]/g,'·');
+    const lbl=['header','Name','DOB','Gender','CareOf','District','Landmark','House','Locality','PIN','PostOffice','State','Street','SubDistrict','VTC','Extra'][i]||'?';
+    return `<span class="xa">seg[${i}] (${lbl})</span> = <span class="xv">${escHtml(c.slice(0,80))}</span>`;
+  });
+  return [...header,...segLines].join('\n');
 }
 
-// ── Autofocus toggle (Android: shouldAutoFocus) ───────────────────
-async function toggleFocus() {
-  if (!vTrack) return;
-  afOn = !afOn;
-  document.getElementById('btnFocus').classList.toggle('on', afOn);
-  try {
-    const caps = vTrack.getCapabilities ? vTrack.getCapabilities() : {};
-    if (caps.focusMode) {
-      await vTrack.applyConstraints({ advanced: [{ focusMode: afOn ? 'continuous' : 'manual' }] });
-    }
-  } catch(e) { /* not all browsers expose focusMode */ }
+// ── Flash / Focus ─────────────────────────────────────────────────
+async function toggleFlash(){
+  if(!vTrack){showInf('Start scanner first.');return;}
+  const caps=vTrack.getCapabilities?vTrack.getCapabilities():{};
+  if(!caps.torch){showInf('Flash not supported on this device/browser.');return;}
+  flashOn=!flashOn;
+  try{
+    await vTrack.applyConstraints({advanced:[{torch:flashOn}]});
+    document.getElementById('btnFlash').classList.toggle('on',flashOn);
+    document.getElementById('flashLbl').textContent=flashOn?'Flash ON':'Flash';
+  }catch(e){flashOn=!flashOn;showErr('Flash failed: '+e.message);}
+}
+async function toggleFocus(){
+  if(!vTrack)return;
+  afOn=!afOn;
+  document.getElementById('btnFocus').classList.toggle('on',afOn);
+  try{
+    const caps=vTrack.getCapabilities?vTrack.getCapabilities():{};
+    if(caps.focusMode)await vTrack.applyConstraints({advanced:[{focusMode:afOn?'continuous':'manual'}]});
+  }catch(e){}
 }
 
-// ── Stop camera ───────────────────────────────────────────────────
-function stopCamera(resetUI) {
-  scanning = false;
-  cancelAnimationFrame(rafId);
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; vTrack = null; }
-  video.srcObject = null;
-  if (resetUI) {
-    setBtnScanning(false);
-    statusEl.textContent = 'Camera stopped';
-  }
+// ── Camera stop/reset ─────────────────────────────────────────────
+function stopCamera(resetUI){
+  scanning=false; cancelAnimationFrame(rafId);
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;vTrack=null;}
+  video.srcObject=null;
+  if(resetUI){setBtnState('idle');statEl.textContent='Camera stopped';}
 }
-
-// ── Reset ─────────────────────────────────────────────────────────
-function resetScanner() {
+function resetScanner(){
   document.getElementById('resCard').classList.remove('show');
-  document.getElementById('scanCard').style.display = 'block';
-  setBtnScanning(false);
-  statusEl.textContent = 'Press "Start Scanning" to begin';
-  rawOpen = false;
+  document.getElementById('scanCard').style.display='block';
+  setBtnState('idle'); statEl.textContent='Press Start Scanning or upload an image';
+  rawOpen=false; dbgOpen=false;
   document.getElementById('rawPre').classList.remove('show');
-  document.getElementById('rawArrow').textContent = '▼';
-  hideMsg();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.getElementById('dbgPanel').classList.remove('show');
+  document.getElementById('rawArr').textContent='▼';
+  document.getElementById('dbgArr').textContent='▼';
+  hideMsg(); window.scrollTo({top:0,behavior:'smooth'});
+}
+function toggleRaw(){
+  rawOpen=!rawOpen;
+  document.getElementById('rawPre').classList.toggle('show',rawOpen);
+  document.getElementById('rawArr').textContent=rawOpen?'▲':'▼';
+}
+function toggleDbg(){
+  dbgOpen=!dbgOpen;
+  document.getElementById('dbgPanel').classList.toggle('show',dbgOpen);
+  document.getElementById('dbgArr').textContent=dbgOpen?'▲':'▼';
 }
 
-// ── Raw XML toggle ────────────────────────────────────────────────
-function toggleRaw() {
-  rawOpen = !rawOpen;
-  document.getElementById('rawPre').classList.toggle('show', rawOpen);
-  document.getElementById('rawArrow').textContent = rawOpen ? '▲' : '▼';
+// ── UI state ──────────────────────────────────────────────────────
+function setLoading(on){
+  document.getElementById('btnStart').classList.toggle('loading',on);
+  document.getElementById('spin').style.display=on?'block':'none';
+  document.getElementById('btnTxt').textContent=on?'Starting Camera…':'📷 Start Scanning';
+  document.getElementById('btnStart').disabled=on;
 }
+function setBtnState(s){
+  const b=document.getElementById('btnStart');
+  b.classList.remove('loading');
+  document.getElementById('spin').style.display='none';
+  b.disabled=s==='scanning';
+  document.getElementById('btnTxt').textContent=s==='scanning'?'🔍 Scanning…':'📷 Start Scanning';
+}
+function showErr(m){document.getElementById('errTxt').textContent=m;document.getElementById('msgErr').classList.add('show');document.getElementById('msgInf').classList.remove('show');document.getElementById('msgWarn').classList.remove('show');}
+function showInf(m){document.getElementById('infTxt').textContent=m;document.getElementById('msgInf').classList.add('show');document.getElementById('msgErr').classList.remove('show');document.getElementById('msgWarn').classList.remove('show');}
+function showWarn(m){document.getElementById('warnTxt').textContent=m;document.getElementById('msgWarn').classList.add('show');document.getElementById('msgErr').classList.remove('show');document.getElementById('msgInf').classList.remove('show');}
+function hideMsg(){['msgErr','msgInf','msgWarn'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 
-// ── UI helpers ────────────────────────────────────────────────────
-function setLoading(on) {
-  document.getElementById('btnStart').classList.toggle('loading', on);
-  document.getElementById('spin').style.display = on ? 'block' : 'none';
-  document.getElementById('btnTxt').textContent = on ? 'Starting Camera…' : '📷 Start Scanning';
-  document.getElementById('btnStart').disabled = on;
-}
-function setBtnScanning(on) {
-  document.getElementById('btnStart').disabled = on;
-  document.getElementById('btnTxt').textContent = on ? '🔍 Scanning…' : '📷 Start Scanning';
-}
-function showErr(msg) {
-  document.getElementById('errTxt').textContent = msg;
-  document.getElementById('msgErr').classList.add('show');
-  document.getElementById('msgInf').classList.remove('show');
-}
-function showInf(msg) {
-  document.getElementById('infTxt').textContent = msg;
-  document.getElementById('msgInf').classList.add('show');
-  document.getElementById('msgErr').classList.remove('show');
-}
-function hideMsg() {
-  document.getElementById('msgErr').classList.remove('show');
-  document.getElementById('msgInf').classList.remove('show');
-}
-
-// ── HTTPS check (camera requires secure context) ──────────────────
-if (location.protocol !== 'https:' && location.hostname !== 'localhost' && !location.hostname.startsWith('127.')) {
-  showErr('⚠ Camera requires HTTPS. Please open this page over a secure https:// connection.');
+// ── HTTPS check ───────────────────────────────────────────────────
+if(location.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(location.hostname)){
+  showErr('⚠ Camera requires HTTPS. Use upload instead, or open over a secure https:// URL.');
 }
 </script>
-
 </body>
 </html>
-
