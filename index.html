@@ -437,6 +437,18 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
   </button>
 </div>
           <div class="vresult" id="mVerRes"></div>
+
+<div id="batchProgress"
+style="
+margin-top:8px;
+display:none;
+max-height:220px;
+overflow:auto;
+border:1px solid #e5e7eb;
+border-radius:8px;
+background:#fff;
+padding:8px">
+</div>
         </div>
         <div class="vsec-inner" id="advEmailWrap" style="display:none">
           <div class="vsec-label">📧 Enter email to verify hash</div>
@@ -1379,6 +1391,113 @@ async function verifyMobile() {
   } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
   btn.disabled = false; btn.textContent = 'Verify';
 }
+  function initBatchProgress(){
+
+  const el =
+    document.getElementById(
+      'batchProgress'
+    );
+
+  el.style.display =
+    'block';
+
+  let html = '';
+
+  for(
+    let p=61;
+    p<=99;
+    p++
+  ){
+
+    html += `
+    <div
+      style="
+      margin-bottom:8px"
+    >
+
+      <div style="
+      display:flex;
+      justify-content:
+      space-between;
+      font-size:12px;
+      margin-bottom:3px">
+
+        <span>
+        ${p}xxxxxxxx
+        </span>
+
+        <span
+        id="pct-${p}">
+        0%
+        </span>
+
+      </div>
+
+      <div style="
+      height:6px;
+      background:#e5e7eb;
+      border-radius:999px">
+
+        <div
+        id="bar-${p}"
+        style="
+        width:0%;
+        height:100%;
+        background:#7c3aed;
+        border-radius:999px">
+        </div>
+
+      </div>
+    </div>`;
+  }
+
+  el.innerHTML =
+    html;
+}
+
+function updateBatchProgress(
+  prefix,
+  checked
+){
+
+  const total =
+    100000000;
+
+  const pct =
+    Math.min(
+      100,
+      (
+        checked /
+        total
+      ) * 100
+    );
+
+  const bar =
+    document.getElementById(
+      'bar-' +
+      prefix
+    );
+
+  const txt =
+    document.getElementById(
+      'pct-' +
+      prefix
+    );
+
+  if(bar){
+
+    bar.style.width =
+      pct.toFixed(2)
+      + '%';
+  }
+
+  if(txt){
+
+    txt.textContent =
+      pct.toFixed(2)
+      + '%';
+  }
+}
   async function attachMobile(){
 
   const btn =
@@ -1405,6 +1524,7 @@ async function verifyMobile() {
   btn.disabled = true;
   btn.textContent =
     'Starting...';
+    initBatchProgress();
 
   let found = false;
   let finished = 0;
@@ -1531,7 +1651,9 @@ checked % 2000
 ){
 
 self.postMessage({
-progress:2000
+progress:2000,
+prefix,
+checked
 });
 }
 }
@@ -1586,6 +1708,21 @@ done:true
         ev.data;
 
       if(d.progress){
+
+  totalChecked +=
+    d.progress;
+
+  updateBatchProgress(
+    d.prefix,
+    d.checked
+  );
+
+  btn.textContent =
+    'Scanning '
+    +
+    totalChecked
+    .toLocaleString();
+}
 
         totalChecked +=
           d.progress;
