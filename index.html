@@ -419,8 +419,17 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
         <div class="vsec-inner" id="advMobileWrap" style="display:none">
           <div class="vsec-label">📱 Enter mobile to verify hash</div>
           <div class="vinput-row">
+            <input class="vinput" id="mobileIn" type="tel" maxlength="10"
+              placeholder="10-digit mobile" inputmode="numeric"/>
+            <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
+          </div>
+          <div class="vresult" id="mVerRes"></div>
+        </div>
+        <div class="vsec-inner" id="advEmailWrap" style="display:none">
+          <div class="vsec-label">📧 Enter email to verify hash</div>
+          <div class="vinput-row">
   <input class="vinput" id="mobileIn" type="tel"
-    placeholder="Leave empty → brute force 61–99"
+    placeholder="Brute force: 61–99"
     inputmode="numeric"/>
 
   <button class="vbtn"
@@ -436,26 +445,20 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
     Attach
   </button>
 </div>
-          <div class="vresult" id="mVerRes"></div>
+
+<div class="vresult" id="mVerRes"></div>
 
 <div id="batchProgress"
 style="
-margin-top:8px;
 display:none;
-max-height:220px;
+margin-top:8px;
+max-height:260px;
 overflow:auto;
 border:1px solid #e5e7eb;
 border-radius:8px;
 background:#fff;
 padding:8px">
 </div>
-        </div>
-        <div class="vsec-inner" id="advEmailWrap" style="display:none">
-          <div class="vsec-label">📧 Enter email to verify hash</div>
-          <div class="vinput-row">
-            <input class="vinput" id="emailIn" type="email" placeholder="Email address"/>
-            <button class="vbtn email-btn" id="eVerBtn" onclick="verifyEmail()">Verify</button>
-          </div>
           <div class="vresult" id="eVerRes"></div>
         </div>
       </div>
@@ -1410,15 +1413,11 @@ async function verifyMobile() {
   ){
 
     html += `
-    <div
-      style="
-      margin-bottom:8px"
-    >
+    <div style="margin-bottom:8px">
 
       <div style="
       display:flex;
-      justify-content:
-      space-between;
+      justify-content:space-between;
       font-size:12px;
       margin-bottom:3px">
 
@@ -1426,8 +1425,7 @@ async function verifyMobile() {
         ${p}xxxxxxxx
         </span>
 
-        <span
-        id="pct-${p}">
+        <span id="pct-${p}">
         0%
         </span>
 
@@ -1448,6 +1446,7 @@ async function verifyMobile() {
         </div>
 
       </div>
+
     </div>`;
   }
 
@@ -1474,25 +1473,21 @@ function updateBatchProgress(
 
   const bar =
     document.getElementById(
-      'bar-' +
-      prefix
+      'bar-'+prefix
     );
 
   const txt =
     document.getElementById(
-      'pct-' +
-      prefix
+      'pct-'+prefix
     );
 
   if(bar){
-
     bar.style.width =
       pct.toFixed(2)
       + '%';
   }
 
   if(txt){
-
     txt.textContent =
       pct.toFixed(2)
       + '%';
@@ -1514,23 +1509,22 @@ function updateBatchProgress(
 
     showVRes(
       res,
-      '❌ No mobile hash in QR',
+      '❌ No mobile hash found',
       false
     );
 
     return;
   }
 
+  initBatchProgress();
+
   btn.disabled = true;
   btn.textContent =
-    'Starting...';
-    initBatchProgress();
+    'Scanning...';
 
   let found = false;
-  let finished = 0;
-  let totalChecked = 0;
-
   const workers = [];
+  let totalChecked = 0;
 
   function stopAllWorkers(){
 
@@ -1541,20 +1535,6 @@ function updateBatchProgress(
     });
   }
 
-  // 61 → 99
-  const queue = [];
-
-  for(
-    let p = 61;
-    p <= 99;
-    p++
-  ){
-    queue.push(p);
-  }
-
-  const MAX_WORKERS = 16;
-
-  // worker code
   const workerCode = `
 self.onmessage =
 async function(e){
@@ -1564,38 +1544,45 @@ prefix,
 hash
 } = e.data;
 
-async function sha256(text){
+async function sha256(
+text
+){
 
-const enc =
+const data =
 new TextEncoder()
 .encode(text);
 
 const digest =
-await crypto.subtle.digest(
+await crypto.subtle
+.digest(
 'SHA-256',
-enc
+data
 );
 
-return Array.from(
+return Array
+.from(
 new Uint8Array(
 digest
 ))
 .map(x =>
 x.toString(16)
 .padStart(2,'0')
-).join('');
+)
+.join('');
 }
 
 let checked = 0;
 
 const start =
 parseInt(
-prefix + '00000000'
+prefix +
+'00000000'
 );
 
 const end =
 parseInt(
-prefix + '99999999'
+prefix +
+'99999999'
 );
 
 for(
@@ -1614,24 +1601,19 @@ mobile,
 ];
 
 for(
-const value
+const val
 of tries
 ){
 
-let current =
-value;
-
-current =
+const h =
 await sha256(
-current
+val
 );
 
 if(
-current
-.toLowerCase()
+h.toLowerCase()
 ===
-hash
-.toLowerCase()
+hash.toLowerCase()
 ){
 
 self.postMessage({
@@ -1646,12 +1628,12 @@ return;
 checked++;
 
 if(
-checked % 2000
+checked % 1000
 === 0
 ){
 
 self.postMessage({
-progress:2000,
+progress:true,
 prefix,
 checked
 });
@@ -1659,7 +1641,8 @@ checked
 }
 
 self.postMessage({
-done:true
+done:true,
+prefix
 });
 }
 `;
@@ -1678,15 +1661,12 @@ done:true
       blob
     );
 
-  function startNextWorker(){
-
-    if(
-      found ||
-      queue.length === 0
-    ) return;
-
-    const prefix =
-      queue.shift();
+  // 39 workers at same time
+  for(
+    let prefix=61;
+    prefix<=99;
+    prefix++
+  ){
 
     const worker =
       new Worker(
@@ -1707,25 +1687,16 @@ done:true
       const d =
         ev.data;
 
+      // progress
       if(d.progress){
 
-  totalChecked +=
-    d.progress;
-
-  updateBatchProgress(
-    d.prefix,
-    d.checked
-  );
-
-  btn.textContent =
-    'Scanning '
-    +
-    totalChecked
-    .toLocaleString();
-}
-
         totalChecked +=
-          d.progress;
+          1000;
+
+        updateBatchProgress(
+          d.prefix,
+          d.checked
+        );
 
         btn.textContent =
           'Scanning '
@@ -1765,7 +1736,7 @@ done:true
           'cMobileBadge'
         )
         .innerHTML =
-          '<span class="contact-badge badge-actual">✓ Attached & Verified</span>';
+        '<span class="contact-badge badge-actual">✓ Attached & Verified</span>';
 
         showVRes(
           res,
@@ -1779,45 +1750,8 @@ done:true
 
         btn.textContent =
           'Attach';
-
-        return;
-      }
-
-      // worker finished
-      if(d.done){
-
-        finished++;
-
-        startNextWorker();
-
-        if(
-          finished === 39 &&
-          !found
-        ){
-
-          showVRes(
-            res,
-            '❌ No match found',
-            false
-          );
-
-          btn.disabled =
-            false;
-
-          btn.textContent =
-            'Attach';
-        }
       }
     };
-  }
-
-  // Start first 16
-  for(
-    let i=0;
-    i<MAX_WORKERS;
-    i++
-  ){
-    startNextWorker();
   }
 }
 
