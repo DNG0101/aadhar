@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Aadhaar QR Scanner v2</title>
+<title>Aadhaar QR Scanner v3</title>
 <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
@@ -227,8 +227,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 <div class="hdr">
   <div class="hdr-ico">🪪</div>
   <div>
-    <h1>Aadhaar QR Scanner v2</h1>
-    <p>Official UIDAI Spec · Binary QR fix · Indicator ambiguity fix · v2</p>
+    <h1>Aadhaar QR Scanner v3</h1>
+    <p>Official UIDAI Spec · Binary indicator fix · Full-res camera · Version prefix fix · v3</p>
   </div>
 </div>
 <div class="pills">
@@ -448,33 +448,51 @@ function getAux(w, h) {
 //  pako.inflate() fails on gzip → must use pako.ungzip() first
 // ═════════════════════════════════════════════════════════════
 function decompressBytes(bytes) {
-  // Try GZIP first (most Secure QRs use gzip)
-  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+  // Inner helper: try all decompression methods on a given byte slice
+  function tryDecompress(b, label) {
+    if (b[0] === 0x1f && b[1] === 0x8b) {
+      try {
+        const d = pako.ungzip(b);
+        dbg('ok', `${label} gzip: ${b.length}→${d.length}B`);
+        return d;
+      } catch(e) { dbg('warn', `${label} gzip fail: ${e.message}`); }
+    }
+    if (b[0] === 0x78) {  // zlib deflate magic (78 01, 78 9C, 78 DA, 78 5E)
+      try {
+        const d = pako.inflate(b);
+        dbg('ok', `${label} zlib: ${b.length}→${d.length}B`);
+        return d;
+      } catch(e) { dbg('warn', `${label} zlib fail: ${e.message}`); }
+    }
+    // Try zlib regardless
     try {
-      const d = pako.ungzip(bytes);
-      dbg('ok', `gzip: ${bytes.length}→${d.length}B`);
+      const d = pako.inflate(b);
+      dbg('ok', `${label} inflate: ${b.length}→${d.length}B`);
       return d;
-    } catch(e) {
-      dbg('warn', 'gzip fail: ' + e.message);
+    } catch(e) {}
+    // Try raw deflate
+    try {
+      const d = pako.inflate(b, {raw: true});
+      dbg('ok', `${label} raw: ${b.length}→${d.length}B`);
+      return d;
+    } catch(e) {}
+    return null;
+  }
+
+  // FIX v3 — VERSION PREFIX BYTE:
+  // Some Aadhaar QR data starts with 1-4 version/format bytes before the
+  // compressed payload (e.g. 0x02 version byte then 0x78 0x9C zlib data).
+  // Try the raw bytes first, then skip 1-4 bytes if that fails.
+  let result = tryDecompress(bytes, 'raw');
+  if (result) return result;
+
+  for (let skip = 1; skip <= 4; skip++) {
+    if (bytes.length > skip + 10) {
+      result = tryDecompress(bytes.slice(skip), `skip${skip}`);
+      if (result) return result;
     }
   }
-  // Try zlib inflate
-  try {
-    const d = pako.inflate(bytes);
-    dbg('ok', `zlib inflate: ${bytes.length}→${d.length}B`);
-    return d;
-  } catch(e) {
-    dbg('warn', 'inflate fail: ' + e.message);
-  }
-  // Try raw deflate
-  try {
-    const d = pako.inflate(bytes, {raw: true});
-    dbg('ok', `raw deflate: ${bytes.length}→${d.length}B`);
-    return d;
-  } catch(e) {
-    dbg('warn', 'raw deflate fail: ' + e.message);
-  }
-  // Return as-is
+
   dbg('warn', 'No decompression worked — using raw bytes');
   return bytes;
 }
@@ -582,38 +600,49 @@ function jsqrFrame() {
 
   _jsqrFrameCount++;
 
-  // Downscale to max 640px wide (preserving aspect ratio)
-  const scale = Math.min(1, 640 / vw);
-  const sw = Math.round(vw * scale), sh = Math.round(vh * scale);
-  if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
-  ctx.drawImage(video, 0, 0, sw, sh);
-  const imgData = ctx.getImageData(0, 0, sw, sh);
+  // FIX v3 — FULL-RESOLUTION CAMERA SCAN:
+  // Aadhaar Secure QR is Version 25-40 (dense, up to 177×177 modules).
+  // Downscaling to 640px makes each module only 3-4px → hard to decode.
+  // Strategy: every frame try at 640px, every 3rd frame try at FULL resolution.
 
+  // Pass 1: downscale to 960px (good balance speed/quality)
+  const scale1 = Math.min(1, 960 / vw);
+  const sw1 = Math.round(vw * scale1), sh1 = Math.round(vh * scale1);
+  if (sc.width !== sw1 || sc.height !== sh1) { sc.width = sw1; sc.height = sh1; }
+  ctx.drawImage(video, 0, 0, sw1, sh1);
+  const imgData1 = ctx.getImageData(0, 0, sw1, sh1);
   let code = null;
-
-  // Pass 1: fast dontInvert (most common)
-  try { code = jsQR(imgData.data, sw, sh, {inversionAttempts: 'dontInvert'}); } catch(e) {}
-
-  // Pass 2: attemptBoth — every other frame (covers inverted QRs)
-  if (!code && _jsqrFrameCount % 2 === 0) {
-    try { code = jsQR(imgData.data, sw, sh, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
+  try { code = jsQR(imgData1.data, sw1, sh1, {inversionAttempts: 'dontInvert'}); } catch(e) {}
+  if (!code) {
+    try { code = jsQR(imgData1.data, sw1, sh1, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
   }
 
-  // Pass 3: 1.5x upscale — every 8th frame only (small/far QRs)
+  // Pass 2: Full video resolution — every 3rd frame (catches very dense QRs)
+  if (!code && _jsqrFrameCount % 3 === 0) {
+    try {
+      const c2 = getAux(vw, vh);
+      const cx2 = c2.getContext('2d', {willReadFrequently: true});
+      cx2.drawImage(video, 0, 0, vw, vh);
+      const id2 = cx2.getImageData(0, 0, vw, vh);
+      code = jsQR(id2.data, vw, vh, {inversionAttempts: 'dontInvert'});
+      if (!code) code = jsQR(id2.data, vw, vh, {inversionAttempts: 'attemptBoth'});
+    } catch(e) {}
+  }
+
+  // Pass 3: 1.5× upscale of Pass 1 — every 8th frame (far/small QRs)
   if (!code && _jsqrFrameCount % 8 === 0) {
     try {
-      const sw2 = Math.min(Math.round(sw * 1.5), 1280);
-      const sh2 = Math.round(sh * 1.5);
-      const c2  = getAux(sw2, sh2);
-      const cx2 = c2.getContext('2d', {willReadFrequently: true});
-      cx2.drawImage(sc, 0, 0, sw2, sh2);
-      code = jsQR(cx2.getImageData(0, 0, sw2, sh2).data, sw2, sh2,
+      const sw3 = Math.min(Math.round(sw1 * 1.5), 1920);
+      const sh3 = Math.round(sh1 * 1.5);
+      const c3  = getAux(sw3, sh3);
+      const cx3 = c3.getContext('2d', {willReadFrequently: true});
+      cx3.drawImage(sc, 0, 0, sw3, sh3);
+      code = jsQR(cx3.getImageData(0, 0, sw3, sh3).data, sw3, sh3,
                   {inversionAttempts: 'dontInvert'});
     } catch(e) {}
   }
 
   if (code) {
-    // FIX A: use jsQR chunk raw bytes (binaryData doesn't exist in jsQR 1.4.0)
     onCameraHit(code.data || code.text || '', extractChunkBytes(code));
     return true;
   }
@@ -918,7 +947,15 @@ function trySecure(bytes, tag) {
       dbg('err', `[${tag}] bad name: "${name}"`); return false;
     }
     dbg('ok', `[${tag}] ✓ name="${name}" dob="${dob}" gender="${gender}"`);
-    const indicator = parseInt(ind) || 0;
+    // FIX v3 — INDICATOR BINARY BYTE (ROOT CAUSE of mobile verification failure):
+    // UIDAI stores the indicator as a RAW BINARY BYTE (0x00, 0x01, 0x02, 0x03),
+    // NOT as an ASCII digit character ('0', '1', '2', '3').
+    // parseInt('\x02') === NaN  →  NaN || 0  → indicator always 0  → no hashes
+    // Fix: read segs[0][0] directly (the raw byte value before ISO-8859-1 decode).
+    const indRaw = segs[0].length > 0 ? segs[0][0] : 0;
+    const indicator = (indRaw >= 0 && indRaw <= 3)  ? indRaw          // binary byte 0-3
+                    : (indRaw >= 48 && indRaw <= 51) ? (indRaw - 48)  // ASCII '0'-'3'
+                    : (parseInt(ind) || 0);                             // fallback
     // FIX B — INDICATOR AMBIGUITY:
     // The UIDAI spec has a direct contradiction between sections:
     //   Section 2.2: indicator=1 → email only, indicator=2 → mobile only
@@ -926,7 +963,7 @@ function trySecure(bytes, tag) {
     // Resolution: when indicator=1 or 2 (single hash in QR), store it in BOTH
     // gMobileHash AND gEmailHash so the user can verify whichever they have.
     // For indicator=3 (both) the positions are unambiguous.
-    dbg('inf', `indicator=${indicator}`);
+    dbg('inf', `indicator raw=0x${indRaw.toString(16)} → ${indicator}`);
     let pos = 0;
     for (let i = 0; i <= 15; i++) { pos += segs[i].length; if (i < 15) pos++; }
     const photoStart = pos + 1;
@@ -1306,11 +1343,17 @@ async function verifyMobile() {
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
 
     // Try bare number + all common prefix variants (UIDAI may hash any form)
+    // Also try with last-4 Aadhaar digits appended as salt (commonSegmentDigest pattern)
+    const uid4 = gRefId ? gRefId.slice(0, 4) : '';
     const candidates = [
-      {label: 'plain',       value: mobile},
-      {label: '+91 prefix',  value: '+91' + mobile},
-      {label: '91 prefix',   value: '91'  + mobile},
-      {label: '0091 prefix', value: '0091' + mobile},
+      {label: 'plain',              value: mobile},
+      {label: '+91 prefix',         value: '+91' + mobile},
+      {label: '91 prefix',          value: '91'  + mobile},
+      {label: '0091 prefix',        value: '0091' + mobile},
+      ...(uid4 ? [
+        {label: 'plain+uid4',       value: mobile + uid4},
+        {label: 'uid4+plain',       value: uid4 + mobile},
+      ] : []),
     ];
 
     for (const cand of candidates) {
