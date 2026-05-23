@@ -406,7 +406,37 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
     <!-- Stored Hashes -->
     <div class="sec" id="hashSec" style="display:none">
       <div class="stitle">🔐 Stored Hashes (from QR)</div>
-      <div class="hrow"><span class="hk">Mobile hash</span><span class="hv" id="mHashRaw"></span></div>
+      <div class="hrow">
+  <span class="hk">Mobile hash</span>
+
+  <div style="
+  display:flex;
+  gap:8px;
+  align-items:flex-start;
+  flex:1">
+
+    <span class="hv"
+    id="mHashRaw"
+    style="flex:1">
+    </span>
+
+    <button
+      onclick="copyMobileHash()"
+      style="
+      background:#1a237e;
+      color:#fff;
+      border:none;
+      border-radius:6px;
+      padding:5px 9px;
+      cursor:pointer;
+      font-size:11px;
+      font-weight:700;
+      white-space:nowrap">
+      Copy
+    </button>
+
+  </div>
+</div>
       <div class="hrow"><span class="hk">Email hash</span><span class="hv" id="eHashRaw"></span></div>
     </div>
 
@@ -419,40 +449,11 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
         <div class="vsec-inner" id="advMobileWrap" style="display:none">
           <div class="vsec-label">📱 Enter mobile to verify hash</div>
           <div class="vinput-row">
-  <input class="vinput"
-    id="mobileIn"
-    type="tel"
-    maxlength="10"
-    placeholder="10-digit mobile"
-    inputmode="numeric"/>
-
-  <button class="vbtn"
-    id="mVerBtn"
-    onclick="verifyMobile()">
-    Verify
-  </button>
-
-  <button class="vbtn"
-    id="mAttachBtn"
-    onclick="attachMobile()"
-    style="background:#7c3aed">
-    Attach
-  </button>
-</div>
-
-<div class="vresult" id="mVerRes"></div>
-
-<div id="batchProgress"
-style="
-display:none;
-margin-top:8px;
-max-height:240px;
-overflow:auto;
-border:1px solid #e5e7eb;
-border-radius:8px;
-background:#fff;
-padding:8px">
-</div>
+            <input class="vinput" id="mobileIn" type="tel" maxlength="10"
+              placeholder="10-digit mobile" inputmode="numeric"/>
+            <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
+          </div>
+          <div class="vresult" id="mVerRes"></div>
         </div>
         <div class="vsec-inner" id="advEmailWrap" style="display:none">
           <div class="vsec-label">📧 Enter email to verify hash</div>
@@ -1395,363 +1396,6 @@ async function verifyMobile() {
   } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
   btn.disabled = false; btn.textContent = 'Verify';
 }
-  function initBatchProgress(){
-
-  const box =
-    document.getElementById(
-      'batchProgress'
-    );
-
-  box.style.display =
-    'block';
-
-  let html = '';
-
-  for(
-    let p=61;
-    p<=99;
-    p++
-  ){
-
-    html += `
-    <div style="margin-bottom:8px">
-
-      <div style="
-      display:flex;
-      justify-content:
-      space-between;
-      font-size:12px;
-      margin-bottom:3px">
-
-        <span>
-        ${p}xxxxxxxx
-        </span>
-
-        <span id="pct-${p}">
-        0%
-        </span>
-
-      </div>
-
-      <div style="
-      height:6px;
-      background:#e5e7eb;
-      border-radius:999px">
-
-        <div
-        id="bar-${p}"
-        style="
-        width:0%;
-        height:100%;
-        background:#7c3aed;
-        border-radius:999px">
-        </div>
-
-      </div>
-
-    </div>`;
-  }
-
-  box.innerHTML =
-    html;
-}
-
-function updateBatchProgress(
-  prefix,
-  checked
-){
-
-  const total =
-    100000000;
-
-  const pct =
-    Math.min(
-      100,
-      (
-        checked /
-        total
-      ) * 100
-    );
-
-  const bar =
-    document.getElementById(
-      'bar-' + prefix
-    );
-
-  const txt =
-    document.getElementById(
-      'pct-' + prefix
-    );
-
-  if(bar){
-    bar.style.width =
-      pct.toFixed(2)
-      + '%';
-  }
-
-  if(txt){
-    txt.textContent =
-      pct.toFixed(2)
-      + '%';
-  }
-}
-
-async function attachMobile(){
-
-  const btn =
-    document.getElementById(
-      'mAttachBtn'
-    );
-
-  const res =
-    document.getElementById(
-      'mVerRes'
-    );
-
-  if(!gMobileHash){
-
-    showVRes(
-      res,
-      '❌ No mobile hash in QR',
-      false
-    );
-
-    return;
-  }
-
-  initBatchProgress();
-
-  btn.disabled =
-    true;
-
-  btn.textContent =
-    'Scanning...';
-
-  let found =
-    false;
-
-  let totalChecked =
-    0;
-
-  const workers =
-    [];
-
-  function stopAll(){
-
-    workers.forEach(w=>{
-
-      try{
-        w.terminate();
-      }catch(e){}
-    });
-  }
-
-  const workerCode = `
-self.onmessage =
-async function(e){
-
-const {
-prefix,
-hash
-} = e.data;
-
-async function sha256(text){
-
-const data =
-new TextEncoder()
-.encode(text);
-
-const digest =
-await crypto.subtle.digest(
-'SHA-256',
-data
-);
-
-return Array.from(
-new Uint8Array(
-digest
-))
-.map(x =>
-x.toString(16)
-.padStart(2,'0')
-).join('');
-}
-
-let checked = 0;
-
-const start =
-parseInt(
-prefix +
-'00000000'
-);
-
-const end =
-parseInt(
-prefix +
-'99999999'
-);
-
-for(
-let num=start;
-num<=end;
-num++
-){
-
-const mobile =
-String(num);
-
-const tries = [
-mobile,
-'91'+mobile,
-'+91'+mobile
-];
-
-for(
-const val
-of tries
-){
-
-const h =
-await sha256(
-val
-);
-
-if(
-h.toLowerCase()
-===
-hash.toLowerCase()
-){
-
-self.postMessage({
-found:true,
-mobile
-});
-
-return;
-}
-}
-
-checked++;
-
-if(
-checked % 1000
-=== 0
-){
-
-self.postMessage({
-progress:true,
-prefix,
-checked
-});
-}
-}
-}
-`;
-
-  const blob =
-    new Blob(
-      [workerCode],
-      {
-        type:
-        'application/javascript'
-      }
-    );
-
-  const url =
-    URL.createObjectURL(
-      blob
-    );
-
-  for(
-    let prefix=61;
-    prefix<=99;
-    prefix++
-  ){
-
-    const worker =
-      new Worker(url);
-
-    workers.push(
-      worker
-    );
-
-    worker.postMessage({
-      prefix,
-      hash:
-      gMobileHash
-    });
-
-    worker.onmessage =
-    function(ev){
-
-      const d =
-        ev.data;
-
-      if(d.progress){
-
-        totalChecked +=
-          1000;
-
-        updateBatchProgress(
-          d.prefix,
-          d.checked
-        );
-
-        btn.textContent =
-          'Scanning '
-          +
-          totalChecked
-          .toLocaleString();
-      }
-
-      if(
-        d.found &&
-        !found
-      ){
-
-        found = true;
-
-        stopAll();
-
-        document
-        .getElementById(
-          'cMobileVal'
-        )
-        .textContent =
-          d.mobile;
-
-        document
-        .getElementById(
-          'cMobileVal'
-        )
-        .classList
-        .add(
-          'masked'
-        );
-
-        document
-        .getElementById(
-          'cMobileBadge'
-        )
-        .innerHTML =
-          '<span class="contact-badge badge-actual">✓ Attached & Verified</span>';
-
-        showVRes(
-          res,
-          '✅ Match Found: '
-          + d.mobile,
-          true
-        );
-
-        btn.disabled =
-          false;
-
-        btn.textContent =
-          'Attach';
-      }
-    };
-  }
-}
 
 async function verifyEmail() {
   const inp   = document.getElementById('emailIn');
@@ -1883,7 +1527,57 @@ function stopCam(resetUI) {
   video.srcObject = null; barcodeDetector = null;
   if (resetUI) { setBtnState('idle'); cst.textContent = 'Camera stopped.'; }
 }
+function copyMobileHash(){
 
+  if(!gMobileHash){
+
+    alert(
+      'No mobile hash found'
+    );
+
+    return;
+  }
+
+  navigator
+  .clipboard
+  .writeText(
+    gMobileHash
+  )
+  .then(()=>{
+
+    alert(
+      'Mobile hash copied'
+    );
+
+  })
+  .catch(()=>{
+
+    const ta =
+      document
+      .createElement(
+        'textarea'
+      );
+
+    ta.value =
+      gMobileHash;
+
+    document.body
+    .appendChild(ta);
+
+    ta.select();
+
+    document
+    .execCommand(
+      'copy'
+    );
+
+    ta.remove();
+
+    alert(
+      'Mobile hash copied'
+    );
+  });
+}
 function resetAll() {
   document.getElementById('resCard').classList.remove('show');
   document.getElementById('scanCard').style.display = 'block';
