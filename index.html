@@ -863,7 +863,21 @@ function trySecure(bytes, tag) {
       dbg('err', `[${tag}] bad name: "${name}"`); return false;
     }
     dbg('ok', `[${tag}] ✓ name="${name}" dob="${dob}" gender="${gender}"`);
-    const indicator = parseInt(ind) || 0;
+    // FIX: Handle both ASCII ('0'–'3') and raw binary byte (0x00–0x03) indicator
+    let indicator = 0;
+    if (segs[0].length > 0) {
+      const rawByte = segs[0][0];
+      if (rawByte >= 0x30 && rawByte <= 0x33) {
+        indicator = rawByte - 0x30;       // ASCII '0'–'3'
+      } else if (rawByte <= 3) {
+        indicator = rawByte;              // binary 0–3
+        dbg('warn', `indicator: binary byte ${rawByte}`);
+      } else {
+        indicator = parseInt(ind) || 0;   // last-resort parseInt
+      }
+    } else {
+      indicator = parseInt(ind) || 0;
+    }
     const emailP    = indicator === 1 || indicator === 3;
     const mobileP   = indicator === 2 || indicator === 3;
     dbg('inf', `indicator=${indicator} mobile=${mobileP} email=${emailP}`);
@@ -1209,23 +1223,32 @@ async function verifyMobile() {
 
   if (!/^\d{10}$/.test(mobile)) {
     inp.classList.add('error');
-    showVRes(res, '❌ Enter a valid 10-digit mobile (or with +91/91 prefix)', false);
+    showVRes(res, '❌ Enter a valid 10-digit mobile number (or with +91/91 prefix)', false);
     return;
   }
   inp.classList.remove('error');
-  if (!gMobileHash) { showVRes(res, '❌ No mobile hash found in QR', false); return; }
+  if (!gMobileHash) { showVRes(res, '❌ No mobile hash found in QR data', false); return; }
 
   btn.disabled = true; btn.textContent = 'Verifying…';
   try {
-    const lastDigit = gRefId && gRefId.length >= 4 ? (parseInt(gRefId.charAt(3)) || 1) : 1;
-    const specIter  = lastDigit < 1 ? 1 : lastDigit;
-    dbg('inf', `Mobile verify: refId="${gRefId}" specIter=${specIter} mobile="${mobile}"`);
+    // FIX: Derive iteration count from last digit of Aadhaar (4th char of refId)
+    // Spec: digit 0 or 1 → apply SHA-256 once; digit 2–9 → apply that many times
+    const lastDigitChar = gRefId && gRefId.length >= 4 ? gRefId.charAt(3) : '1';
+    const lastDigit     = parseInt(lastDigitChar);
+    const specIter      = (!isNaN(lastDigit) && lastDigit >= 1) ? lastDigit : 1;
+    dbg('inf', `Mobile verify: refId="${gRefId}" lastDigit="${lastDigitChar}" specIter=${specIter} mobile="${mobile}"`);
 
     // Build ordered list: spec iteration first, then all others 1–9
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
 
-    // Try bare number + all common prefix variants (UIDAI may hash any form)
+    // FIX: Also try reversed byte order of stored hash (spec says "in reverse order"
+    // which is ambiguous — some QR tools store the hash bytes LSB-first)
+    const mHashFwd = gMobileHash.toLowerCase();
+    const mHashRev = (gMobileHash.match(/.{2}/g) || []).reverse().join('').toLowerCase();
+    const hashTargets = mHashFwd !== mHashRev ? [mHashFwd, mHashRev] : [mHashFwd];
+
+    // Try bare number + all common prefix variants (UIDAI may hash with country code)
     const candidates = [
       {label: 'plain',       value: mobile},
       {label: '+91 prefix',  value: '+91' + mobile},
@@ -1236,27 +1259,30 @@ async function verifyMobile() {
     for (const cand of candidates) {
       for (const n of toTry) {
         const computed = await sha256n(cand.value, n);
-        const match    = computed.toLowerCase() === gMobileHash.toLowerCase();
-        if (match) {
-          showVRes(res,
-            `✅ Mobile Verified!\n${mobile}\nSHA-256 × ${n}${cand.label !== 'plain' ? ' · hashed as ' + cand.value : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
-            true);
-          showVerifiedContact('mobile', mobile);
-          btn.disabled = false; btn.textContent = 'Verified ✅';
-          dbg('ok', `Mobile verified: iter=${n} candidate="${cand.value}"`);
-          return;
+        for (const target of hashTargets) {
+          if (computed === target) {
+            const byteOrderNote = target === mHashRev && mHashFwd !== mHashRev ? ' (reversed byte order)' : '';
+            showVRes(res,
+              `✅ Mobile Verified!\n${mobile}\nSHA-256 × ${n}${cand.label !== 'plain' ? ' · hashed as ' + cand.value : ''}${byteOrderNote}${n !== specIter ? ' (fallback iter)' : ' (per spec)'}`,
+              true);
+            showVerifiedContact('mobile', mobile);
+            btn.disabled = false; btn.textContent = 'Verified ✅';
+            dbg('ok', `Mobile verified: iter=${n} candidate="${cand.value}"${byteOrderNote}`);
+            return;
+          }
         }
       }
     }
 
-    // All failed
+    // All failed — show diagnostic info
     const computed = await sha256n(mobile, specIter);
     showVRes(res,
-      `❌ Mobile number does not match.\nComputed (×${specIter}): ${computed.slice(0,16)}…\nExpected:        ${gMobileHash.slice(0,16)}…\n(Tried iterations 1–9 and +91/91/0091 prefixes)`,
+      `❌ Mobile number does not match.\nComputed (×${specIter}): ${computed.slice(0,16)}…\nStored (forward): ${mHashFwd.slice(0,16)}…\nStored (reversed): ${mHashRev.slice(0,16)}…\n(Tried iterations 1–9, +91/91/0091 prefixes, and both hash byte orders)`,
       false);
-    dbg('warn', `Mobile not matched: ${mobile}`);
+    dbg('warn', `Mobile not matched: "${mobile}" specIter=${specIter} hashFwd=${mHashFwd.slice(0,8)} hashRev=${mHashRev.slice(0,8)}`);
   } catch(e) {
     showVRes(res, '❌ Verification error: ' + e.message, false);
+    dbg('err', 'verifyMobile: ' + e.message);
   }
   btn.disabled = false; btn.textContent = 'Verify';
 }
@@ -1273,36 +1299,46 @@ async function verifyEmail() {
     return;
   }
   inp.classList.remove('error');
-  if (!gEmailHash) { showVRes(res, '❌ No email hash found in QR', false); return; }
+  if (!gEmailHash) { showVRes(res, '❌ No email hash found in QR data', false); return; }
 
   btn.disabled = true; btn.textContent = 'Verifying…';
   try {
-    const lastDigit = gRefId && gRefId.length >= 4 ? (parseInt(gRefId.charAt(3)) || 1) : 1;
-    const specIter  = lastDigit < 1 ? 1 : lastDigit;
+    // FIX: Derive iteration count from last digit of Aadhaar (4th char of refId)
+    const lastDigitChar = gRefId && gRefId.length >= 4 ? gRefId.charAt(3) : '1';
+    const lastDigit     = parseInt(lastDigitChar);
+    const specIter      = (!isNaN(lastDigit) && lastDigit >= 1) ? lastDigit : 1;
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
-    // Also try uppercase variant
+
+    // FIX: Also try reversed byte order of stored email hash
+    const eHashFwd = gEmailHash.toLowerCase();
+    const eHashRev = (gEmailHash.match(/.{2}/g) || []).reverse().join('').toLowerCase();
+    const hashTargets = eHashFwd !== eHashRev ? [eHashFwd, eHashRev] : [eHashFwd];
+
+    // Try lowercase and uppercase variants
     const candidates = [email, email.toUpperCase()];
     for (const cand of candidates) {
       for (const n of toTry) {
         const computed = await sha256n(cand, n);
-        const match    = computed.toLowerCase() === gEmailHash.toLowerCase();
-        if (match) {
-          showVRes(res,
-            `✅ Email Verified!\n${email}\nSHA-256 × ${n}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
-            true);
-          // FIX #5 — Show verified email on result card
-          showVerifiedContact('email', email);
-          btn.disabled = false; btn.textContent = 'Verified ✅';
-          dbg('ok', `Email verified: iter=${n}`);
-          return;
+        for (const target of hashTargets) {
+          if (computed === target) {
+            const byteOrderNote = target === eHashRev && eHashFwd !== eHashRev ? ' (reversed byte order)' : '';
+            showVRes(res,
+              `✅ Email Verified!\n${email}\nSHA-256 × ${n}${byteOrderNote}${n !== specIter ? ' (fallback iter)' : ' (per spec)'}`,
+              true);
+            showVerifiedContact('email', email);
+            btn.disabled = false; btn.textContent = 'Verified ✅';
+            dbg('ok', `Email verified: iter=${n}${byteOrderNote}`);
+            return;
+          }
         }
       }
     }
-    showVRes(res, '❌ Email address does not match stored hash.\n(Tried iterations 1–9, none matched)', false);
-    dbg('warn', `Email not matched: ${email}`);
+    showVRes(res, '❌ Email address does not match stored hash.\n(Tried iterations 1–9, both byte orders, none matched)', false);
+    dbg('warn', `Email not matched: "${email}" specIter=${specIter} hashFwd=${eHashFwd.slice(0,8)}`);
   } catch(e) {
     showVRes(res, '❌ Error: ' + e.message, false);
+    dbg('err', 'verifyEmail: ' + e.message);
   }
   btn.disabled = false; btn.textContent = 'Verify';
 }
