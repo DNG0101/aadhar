@@ -1,246 +1,295 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aadhaar QR Scanner</title>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Aadhaar QR Scanner</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  COMPLETE UIDAI SECURE QR IMPLEMENTATION — All features:
+  ─────────────────────────────────────────────────────────────────
+  QR DETECTION:
+    • Camera: multi-scale tick (1x + 2x) + ZXing fallback per frame
+    • Upload: 10 scale passes (4x→0.25x) + greyscale + ZXing passes
+    • Library: jsQR + @zxing/library (same engine as Android APK)
 
-  <!--
-  ═══════════════════════════════════════════════════════════════
-  OFFICIAL UIDAI SECURE QR SPEC (v0, 2011-2019) IMPLEMENTATION
-  ─────────────────────────────────────────────────────────────
-  QR DETECTION ENGINE (why jsQR alone fails on Aadhaar):
-    Aadhaar Secure QR = Version ~40 QR code = 177×177 modules
-    jsQR needs ≥2px per module = ≥354px QR area in the image
-    Fix: try 8 different scales (0.25x → 4x) + grayscale pass
-    Fallback: @zxing/library UMD (same engine as Android APK)
+  PARSE ALGORITHM (official UIDAI Spec v0 + APK analysis):
+    1. QR raw string → BigInt(decimal) → big-endian byte array
+    2. pako.inflate(bytes) → ZLIB decompress (the key missing step)
+    3. Split decompressed by 0xFF → ISO-8859-1 strings
+    4. seg[0]=indicator  [1]=refId  [2]=name  [3]=dob  [4]=gender
+       [5]=careOf  [6]=district  [7]=landmark  [8]=house  [9]=loc
+       [10]=pinCode  [11]=postOffice  [12]=state  [13]=street
+       [14]=subDistrict  [15]=VTC
+    5. Photo = bytes after seg[15] until (end - sig - hashes)
+    6. Signature = last 256 bytes
+    7. Mobile hash = 32 bytes before sig  (if indicator 2 or 3)
+    8. Email hash = 32 bytes before mobile hash  (if indicator 1 or 3)
 
-  APK ANALYSIS FINDINGS (base_.apk):
-    • Library: in.net.uidai.qrcodescanner (official UIDAI SDK)
-    • Scanner: journeyapps/barcodescanner (ZXing wrapper)
-    • ML Kit TFLite models for barcode detection
-    • Methods: decodeQRCode, decompress, validateSignature
-    • Classes: QrModule, CryptoModule, ScannerModule, crypto/a,b
-    • Cert verify: SHA256withRSA using assets/Prod_QR_CodeSignValidationCert.cer
+  JPEG2000 PHOTO (APK uses org.openJpeg.OpenJPEGJavaDecoder):
+    • Try native jp2 blob URL → works in Safari
+    • Try raw JPEG (if magic FF D8) → works in all browsers
+    • Embed in minimal PDF → render via pdfjs-dist → works in Chrome/FF
+    • Parse JPC/JP2 header to extract true W×H for PDF embedding
 
-  PARSE ALGORITHM (confirmed from UIDAI spec + APK):
-    1. QR → decimal string (NUMERIC mode, 500-700 digits)
-    2. BigInteger(decimal) → big-endian byte array
-    3. pako.inflate(bytes) → zlib decompress  ← was missing before
-    4. Split decompressed bytes by 0xFF using ISO-8859-1 encoding
-    5. seg[0]=indicator  seg[1]=refId  seg[2]=name  seg[3]=dob
-       seg[4]=gender  seg[5]=careOf  seg[6]=district  seg[7]=landmark
-       seg[8]=house  seg[9]=location  seg[10]=pinCode  seg[11]=postOffice
-       seg[12]=state  seg[13]=street  seg[14]=subDistrict  seg[15]=VTC
-    6. After seg[15]: JPEG2000 photo bytes
-    7. From END: 256B RSA sig, 32B mobile hash, 32B email hash
-  ═══════════════════════════════════════════════════════════════
-  -->
+  MOBILE VERIFICATION (APK: CryptoModule, SHA256withRSA):
+    • Get last digit of Aadhaar = refId[3]
+    • iterations = digit≤1 ? 1 : digit
+    • SHA-256(mobile) × iterations using WebCrypto API
+    • Compare with stored 32-byte mobile hash
 
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+  APK FINDINGS:
+    Classes: QrModule, CryptoModule, ScannerModule, crypto/a,b
+    Cert: assets/Prod_QR_CodeSignValidationCert.cer (Capricorn CA 2014)
+    Cert: assets/eaadhaar_2026_29.cer  assets/UIDAI_2024_26.cer
+  ═══════════════════════════════════════════════════════════════════
+-->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --pri:#1a237e;--sec:#3949ab;--ok:#2e7d32;--err:#c62828;--warn:#e65100;
+  --bg:#eef0f5;--card:#fff;--txt:#111827;--dim:#6b7280;--bdr:#e5e7eb;
+  --scan:#00e5ff;--vok:#43a047
+}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height:100vh;color:var(--txt)}
 
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    :root{
-      --pri:#1a237e;--ok:#2e7d32;--warn:#e65100;--err:#c62828;
-      --bg:#f0f2f5;--card:#fff;--txt:#1a1a2e;--dim:#6b7280;--bdr:#e5e7eb;--sc:#00e5ff
-    }
-    body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
+/* ─── Header ─── */
+.hdr{background:linear-gradient(135deg,#0d1757,#1a237e,#283593);color:#fff;
+  padding:14px 18px;display:flex;align-items:center;gap:12px;
+  box-shadow:0 3px 16px rgba(13,23,87,.45)}
+.hdr-ico{width:44px;height:44px;background:rgba(255,255,255,.13);border-radius:12px;
+  display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.hdr h1{font-size:1.07rem;font-weight:800;letter-spacing:-.2px}
+.hdr p{font-size:.68rem;opacity:.72;margin-top:2px}
+.pills{display:flex;flex-wrap:wrap;gap:4px;padding:6px 14px;background:#e8eaf6;border-bottom:1px solid #c5cae9}
+.pill{font-size:.62rem;font-weight:700;padding:2px 7px;border-radius:20px;color:#fff}
+.pill-b{background:#1a237e}.pill-g{background:#2e7d32}.pill-o{background:#e65100}
 
-    .hdr{background:linear-gradient(135deg,#1a237e,#3949ab);color:#fff;
-      padding:14px 18px;display:flex;align-items:center;gap:12px;
-      box-shadow:0 2px 12px rgba(26,35,126,.35)}
-    .hdr-ico{width:42px;height:42px;background:rgba(255,255,255,.15);border-radius:11px;
-      display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0}
-    .hdr h1{font-size:1.1rem;font-weight:700}
-    .hdr p{font-size:.7rem;opacity:.75;margin-top:2px}
+/* ─── Messages ─── */
+.msg{border-radius:9px;padding:9px 12px;font-size:.78rem;margin-bottom:10px;
+  display:none;align-items:flex-start;gap:8px;line-height:1.5}
+.msg.show{display:flex}
+.msg.err{background:#fef2f2;border:1px solid #fca5a5;color:var(--err)}
+.msg.inf{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
+.msg.warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412}
+.msg-ico{flex-shrink:0;width:15px;height:15px;margin-top:1px}
 
-    .strip{background:#e8eaf6;border-left:4px solid var(--pri);padding:6px 15px;
-      font-size:.68rem;color:#283593;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-    .bge{background:var(--pri);color:#fff;border-radius:4px;padding:1px 6px;font-size:.65rem;font-weight:700}
-    .bge.g{background:#2e7d32}.bge.r{background:#b71c1c}.bge.o{background:#e65100}
+.wrap{max-width:540px;margin:0 auto;padding:13px 11px 48px}
 
-    .wrap{max-width:520px;margin:0 auto;padding:14px 11px 40px}
+/* ─── Scanner card ─── */
+.scard{background:var(--card);border-radius:18px;overflow:hidden;
+  box-shadow:0 4px 22px rgba(0,0,0,.1);margin-bottom:14px}
+.vp{position:relative;width:100%;aspect-ratio:1;background:#0a0a12;overflow:hidden}
+#video{width:100%;height:100%;object-fit:cover;display:block}
+#sc{display:none}
+.dimov{position:absolute;inset:0;
+  background:radial-gradient(ellipse 65% 65% at 50% 50%,transparent,rgba(0,0,0,.62) 100%);
+  pointer-events:none}
+.finder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.sq{width:62%;aspect-ratio:1;position:relative}
+.sq::before,.sq::after,.sq .br,.sq .bl{content:'';position:absolute;
+  width:26px;height:26px;border-color:var(--scan);border-style:solid}
+.sq::before{top:0;left:0;border-width:4px 0 0 4px;border-radius:4px 0 0 4px}
+.sq::after{top:0;right:0;border-width:4px 4px 0 0;border-radius:0 4px 0 0}
+.sq .br{bottom:0;right:0;border-width:0 4px 4px 0;border-radius:0 0 4px 0}
+.sq .bl{bottom:0;left:0;border-width:0 0 4px 4px;border-radius:0 0 0 4px}
+.scanline{position:absolute;left:3px;right:3px;height:2px;
+  background:linear-gradient(90deg,transparent,var(--scan),transparent);
+  box-shadow:0 0 8px var(--scan);animation:scanMove 2s linear infinite}
+@keyframes scanMove{0%{top:3px;opacity:1}95%{top:calc(100% - 5px);opacity:1}100%{top:calc(100% - 5px);opacity:0}}
+.okflash{position:absolute;inset:0;background:rgba(67,160,71,.3);
+  opacity:0;pointer-events:none;transition:opacity .1s}
+.okflash.on{opacity:1;transition:none}
+.camstat{position:absolute;bottom:10px;left:0;right:0;text-align:center;
+  color:rgba(255,255,255,.92);font-size:.73rem;font-weight:600;
+  text-shadow:0 1px 5px rgba(0,0,0,.9);padding:0 10px}
 
-    .msg{border-radius:9px;padding:9px 12px;font-size:.79rem;
-      margin-bottom:11px;display:none;align-items:flex-start;gap:8px;line-height:1.5}
-    .msg.show{display:flex}
-    .msg.err{background:#fef2f2;border:1px solid #fca5a5;color:var(--err)}
-    .msg.inf{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
-    .msg.warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412}
-    .msg svg{flex-shrink:0;width:16px;height:16px;margin-top:1px}
+/* Camera controls */
+.camctrl{display:flex;border-top:1px solid var(--bdr)}
+.ccb{flex:1;padding:10px 4px;background:none;border:none;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  font-size:.62rem;color:var(--dim);font-weight:600;transition:.15s}
+.ccb:hover{background:#f3f4f6;color:var(--pri)}.ccb.on{color:#f57c00}
+.ccb svg{width:18px;height:18px}
+.cdiv{width:1px;background:var(--bdr);margin:6px 0}
 
-    /* ─── Scanner card ─── */
-    .card{background:var(--card);border-radius:17px;overflow:hidden;
-      box-shadow:0 4px 20px rgba(0,0,0,.09);margin-bottom:14px}
-    .vp{position:relative;width:100%;aspect-ratio:1;background:#111;overflow:hidden}
-    #video{width:100%;height:100%;object-fit:cover;display:block}
-    #scanCanvas{display:none}
-    .dimov{position:absolute;inset:0;
-      background:radial-gradient(ellipse 68% 68% at center,transparent 0%,rgba(0,0,0,.6) 100%);
-      pointer-events:none}
-    .fw{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-    .sf{width:65%;aspect-ratio:1;position:relative}
-    .sf::before,.sf::after,.sf .br,.sf .bl{content:'';position:absolute;
-      width:28px;height:28px;border-color:var(--sc);border-style:solid}
-    .sf::before{top:0;left:0;border-width:4px 0 0 4px;border-radius:4px 0 0 4px}
-    .sf::after{top:0;right:0;border-width:4px 4px 0 0;border-radius:0 4px 0 0}
-    .sf .br{bottom:0;right:0;border-width:0 4px 4px 0;border-radius:0 0 4px 0}
-    .sf .bl{bottom:0;left:0;border-width:0 0 4px 4px;border-radius:0 0 0 4px}
-    .sl{position:absolute;left:4px;right:4px;height:2px;
-      background:linear-gradient(90deg,transparent,var(--sc),transparent);
-      box-shadow:0 0 8px var(--sc);animation:sw 2s linear infinite}
-    @keyframes sw{0%{top:4px;opacity:1}95%{top:calc(100% - 6px);opacity:1}100%{top:calc(100% - 6px);opacity:0}}
-    .okflash{position:absolute;inset:0;background:rgba(46,125,50,.35);
-      opacity:0;pointer-events:none;transition:opacity .1s}
-    .okflash.on{opacity:1;transition:opacity 0s}
-    .stat{position:absolute;bottom:12px;left:0;right:0;text-align:center;
-      color:rgba(255,255,255,.9);font-size:.74rem;font-weight:500;
-      text-shadow:0 1px 4px rgba(0,0,0,.8);padding:0 10px}
+/* Start button */
+.sbw{padding:12px 13px}
+.sbtn{width:100%;padding:12px;background:linear-gradient(135deg,var(--pri),var(--sec));
+  color:#fff;border:none;border-radius:11px;font-size:.88rem;font-weight:700;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
+  box-shadow:0 4px 14px rgba(26,35,126,.32);transition:transform .1s}
+.sbtn:hover:not(:disabled){transform:translateY(-1px)}
+.sbtn:disabled{background:#9ca3af;box-shadow:none;cursor:not-allowed}
+.sp{width:15px;height:15px;border:2px solid rgba(255,255,255,.3);
+  border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
+.ld .sp{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-    .ctrls{display:flex;border-top:1px solid var(--bdr)}
-    .cb{flex:1;padding:10px 5px;background:none;border:none;cursor:pointer;
-      display:flex;flex-direction:column;align-items:center;gap:3px;
-      font-size:.63rem;color:var(--dim);font-weight:500;transition:background .15s,color .15s}
-    .cb:hover{background:#f3f4f6;color:var(--pri)}
-    .cb.on{color:#ff6f00}
-    .cb svg{width:19px;height:19px}
-    .cdv{width:1px;background:var(--bdr);margin:7px 0}
-    .sw{padding:13px}
-    .btn{width:100%;padding:12px;background:linear-gradient(135deg,#1a237e,#3949ab);
-      color:#fff;border:none;border-radius:11px;font-size:.88rem;font-weight:700;
-      cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
-      transition:transform .1s,box-shadow .2s;box-shadow:0 4px 14px rgba(26,35,126,.35)}
-    .btn:hover:not(:disabled){transform:translateY(-1px)}
-    .btn:disabled{background:#9ca3af;box-shadow:none;cursor:not-allowed}
-    .sp{width:15px;height:15px;border:2px solid rgba(255,255,255,.3);
-      border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
-    .loading .sp{display:block}
-    @keyframes spin{to{transform:rotate(360deg)}}
+/* Upload area */
+.upsec{padding:0 13px 14px}
+.uplbl{font-size:.65rem;font-weight:800;color:var(--dim);text-transform:uppercase;
+  letter-spacing:.8px;margin-bottom:7px;display:block}
+.drop{border:2px dashed #c5cae9;border-radius:13px;background:#f8f9ff;
+  padding:20px 14px;text-align:center;cursor:pointer;transition:.2s;position:relative}
+.drop:hover,.drop.drag{border-color:var(--pri);background:#e8eaf6}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.drop-ico{font-size:1.9rem;margin-bottom:5px}
+.drop-t{font-size:.8rem;font-weight:700;color:var(--pri);margin-bottom:3px}
+.drop-s{font-size:.66rem;color:var(--dim)}
 
-    /* ─── Upload area ─── */
-    .upload-section{padding:0 13px 13px}
-    .upload-label{font-size:.68rem;font-weight:700;color:var(--dim);
-      text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px;display:block}
-    .upload-drop{border:2px dashed #c5cae9;border-radius:12px;background:#f8f9ff;
-      padding:18px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
-    .upload-drop:hover,.upload-drop.drag{border-color:var(--pri);background:#e8eaf6}
-    .upload-drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-    .upload-ico{font-size:1.8rem;margin-bottom:5px}
-    .upload-txt{font-size:.79rem;font-weight:600;color:var(--pri);margin-bottom:3px}
-    .upload-sub{font-size:.68rem;color:var(--dim)}
+/* Scan progress */
+.prog-box{display:none;padding:11px 13px;background:#f8f9ff;border-top:1px solid var(--bdr)}
+.prog-box.show{display:block}
+.prog-inner{display:flex;gap:10px;align-items:flex-start}
+#prevImg{width:76px;height:76px;object-fit:contain;border-radius:8px;
+  border:1px solid var(--bdr);background:#e5e7eb;flex-shrink:0}
+.prog-info{flex:1;min-width:0}
+.prog-name{font-size:.71rem;font-weight:700;color:var(--txt);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog-dim{font-size:.63rem;color:var(--dim);margin-top:1px}
+.bar{height:4px;background:#e5e7eb;border-radius:4px;margin-top:7px;overflow:hidden}
+.fill{height:100%;background:linear-gradient(90deg,var(--pri),#7c4dff);
+  border-radius:4px;transition:width .25s;width:0}
+.plab{font-size:.62rem;color:var(--pri);font-weight:600;margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
+.chip{font-size:.57rem;padding:1px 5px;border-radius:20px;font-weight:700}
+.chip.p{background:#f3f4f6;color:var(--dim)}
+.chip.ok{background:#dcfce7;color:#166534}
+.chip.f{background:#fee2e2;color:var(--err)}
 
-    /* Image preview before/during scan */
-    .preview-box{display:none;padding:10px 13px;background:#f8f9ff;border-top:1px solid var(--bdr)}
-    .preview-box.show{display:block}
-    .preview-inner{display:flex;gap:10px;align-items:flex-start}
-    #previewImg{width:80px;height:80px;object-fit:contain;border-radius:8px;
-      border:1px solid var(--bdr);background:#e5e7eb;flex-shrink:0}
-    .preview-info{flex:1;min-width:0}
-    .preview-name{font-size:.72rem;font-weight:700;color:var(--txt);
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .preview-dim{font-size:.65rem;color:var(--dim);margin-top:2px}
-    .prog-bar{height:4px;background:#e5e7eb;border-radius:4px;margin-top:8px;overflow:hidden}
-    .prog-fill{height:100%;background:linear-gradient(90deg,var(--pri),#7c4dff);
-      border-radius:4px;transition:width .3s;width:0%}
-    .prog-label{font-size:.62rem;color:var(--pri);font-weight:600;margin-top:4px}
-    .scan-attempts{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}
-    .att-chip{font-size:.58rem;padding:1px 6px;border-radius:20px;font-weight:600}
-    .att-chip.pending{background:#f3f4f6;color:var(--dim)}
-    .att-chip.ok{background:#dcfce7;color:#166534}
-    .att-chip.fail{background:#fee2e2;color:var(--err)}
+/* ─── Result card ─── */
+.rcard{background:var(--card);border-radius:18px;overflow:hidden;
+  box-shadow:0 4px 22px rgba(0,0,0,.1);display:none;
+  animation:slideUp .4s cubic-bezier(.34,1.56,.64,1)}
+.rcard.show{display:block}
+@keyframes slideUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
 
-    /* ─── Result card ─── */
-    .res{background:var(--card);border-radius:17px;overflow:hidden;
-      box-shadow:0 4px 20px rgba(0,0,0,.09);display:none;
-      animation:up .4s cubic-bezier(.34,1.56,.64,1)}
-    .res.show{display:block}
-    @keyframes up{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.rh{padding:14px 16px;display:flex;align-items:center;gap:11px;color:#fff}
+.rh.xml{background:linear-gradient(135deg,#2e7d32,#388e3c)}
+.rh.bin{background:linear-gradient(135deg,#bf360c,#e64a19)}
+.rh.fail{background:linear-gradient(135deg,#b71c1c,#e53935)}
+.rico{width:40px;height:40px;background:rgba(255,255,255,.2);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.rh h2{font-size:.9rem;font-weight:800}
+.rh p{font-size:.67rem;opacity:.85;margin-top:1px}
+.rpill{display:inline-block;font-size:.59rem;font-weight:800;
+  padding:1px 6px;border-radius:20px;margin-left:6px;vertical-align:middle}
+.rp-xml{background:#c8e6c9;color:#1b5e20}.rp-bin{background:#ffe0b2;color:#bf360c}
 
-    .rh{padding:14px 17px;display:flex;align-items:center;gap:11px;color:#fff}
-    .rh.xml{background:linear-gradient(135deg,#2e7d32,#43a047)}
-    .rh.bin{background:linear-gradient(135deg,#e65100,#ef6c00)}
-    .rh.fail{background:linear-gradient(135deg,#b71c1c,#e53935)}
-    .rico{width:40px;height:40px;background:rgba(255,255,255,.2);border-radius:50%;
-      display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
-    .rh h2{font-size:.92rem;font-weight:700}
-    .rh p{font-size:.68rem;opacity:.85;margin-top:1px}
+/* ─── Photo row ─── */
+.phrow{display:flex;gap:13px;padding:14px 16px;
+  background:linear-gradient(135deg,#f0f2f8,#e8eaf6);border-bottom:1px solid var(--bdr)}
+.photo-wrap{flex-shrink:0;position:relative}
+#aPhoto{width:80px;height:100px;object-fit:cover;border-radius:9px;
+  border:2px solid var(--pri);display:none;cursor:pointer}
+.photo-ph{width:80px;height:100px;border-radius:9px;border:2px dashed #b0bec5;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:#eceff1;color:#90a4ae;font-size:1.9rem;flex-shrink:0;gap:2px}
+.photo-ph span{font-size:.55rem;color:#90a4ae;text-align:center;padding:0 4px;line-height:1.3}
+.photo-badge{position:absolute;bottom:-5px;right:-5px;background:var(--vok);
+  color:#fff;border-radius:20px;font-size:.55rem;font-weight:700;padding:2px 5px;
+  box-shadow:0 2px 6px rgba(0,0,0,.2);display:none}
+.photo-decode-btn{display:none;margin-top:5px;width:80px;padding:3px;
+  background:var(--pri);color:#fff;border:none;border-radius:5px;
+  font-size:.58rem;font-weight:700;cursor:pointer;text-align:center}
 
-    .photo-row{display:flex;padding:13px 16px;gap:13px;
-      background:#f8f9ff;border-bottom:1px solid var(--bdr);align-items:center}
-    #aadhaarPhoto{width:68px;height:85px;object-fit:cover;border-radius:7px;
-      border:2px solid var(--bdr);background:#e5e7eb;display:none}
-    .photo-ph{width:68px;height:85px;border-radius:7px;border:2px dashed var(--bdr);
-      display:flex;align-items:center;justify-content:center;
-      color:var(--dim);font-size:1.7rem;background:#f9fafb;flex-shrink:0}
-    .uid-info label{font-size:.62rem;color:var(--dim);font-weight:700;
-      text-transform:uppercase;letter-spacing:.8px}
-    .uid-dig{font-size:1.1rem;font-weight:700;letter-spacing:4px;
-      color:var(--pri);font-family:'Courier New',monospace;margin-top:3px}
-    .uid-sub{font-size:.66rem;color:var(--dim);margin-top:3px}
-    .uid-ind{display:inline-block;background:#e8eaf6;color:var(--pri);
-      border-radius:4px;padding:1px 6px;font-size:.6rem;font-weight:700;margin-top:3px}
-    .um{color:var(--dim)}
+.uid-block{}
+.uid-block label{font-size:.61rem;font-weight:800;color:var(--dim);
+  text-transform:uppercase;letter-spacing:.8px;display:block}
+.uid-num{font-size:1.2rem;font-weight:800;color:var(--pri);
+  letter-spacing:4px;font-family:'Courier New',monospace;margin-top:3px}
+.uid-msk{color:#9ca3af}
+.uid-ts{font-size:.66rem;color:var(--dim);margin-top:3px}
+.uid-ind{display:inline-block;background:#e8eaf6;color:var(--pri);
+  border-radius:5px;padding:2px 7px;font-size:.6rem;font-weight:700;margin-top:4px}
+.uid-ind.present{background:#e8f5e9;color:#1b5e20}
+.uid-ind.none{background:#f3f4f6;color:var(--dim)}
 
-    .sec{padding:0 15px}
-    .sec-t{font-size:.61rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;
-      color:var(--pri);padding:11px 0 6px;border-bottom:2px solid #e8eaf6;
-      margin-bottom:2px;display:flex;align-items:center;gap:5px}
-    .sec-t svg{width:13px;height:13px}
-    .fr{display:flex;padding:7px 0;border-bottom:1px solid #f3f4f6;gap:8px}
-    .fr:last-child{border-bottom:none}
-    .fk{font-size:.65rem;color:var(--dim);font-weight:500;min-width:107px;flex-shrink:0;padding-top:1px}
-    .fv{font-size:.78rem;font-weight:600;color:var(--txt);word-break:break-word}
-    .fv.na{color:var(--dim);font-weight:400;font-style:italic}
-    .gb{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.68rem;font-weight:700}
-    .gM{background:#dbeafe;color:#1d4ed8}.gF{background:#fce7f3;color:#be185d}
-    .gT{background:#f3e8ff;color:#7c3aed}
-    .hash-row{display:flex;padding:6px 0;gap:8px;border-bottom:1px solid #f3f4f6;align-items:flex-start}
-    .hk{font-size:.64rem;color:var(--dim);min-width:107px;flex-shrink:0}
-    .hv{font-size:.6rem;font-family:'Courier New',monospace;color:#374151;
-      word-break:break-all;background:#f3f4f6;padding:3px 6px;border-radius:4px;flex:1}
+/* ─── Sections ─── */
+.sec{padding:2px 15px}
+.stitle{font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+  color:var(--pri);padding:11px 0 6px;border-bottom:2px solid #ede7f6;
+  margin-bottom:2px;display:flex;align-items:center;gap:5px}
+.stitle svg{width:13px;height:13px}
+.row{display:flex;padding:7px 0;border-bottom:1px solid #f5f3ff;gap:8px;align-items:flex-start}
+.row:last-child{border-bottom:none}
+.rk{font-size:.64rem;color:var(--dim);font-weight:500;min-width:108px;flex-shrink:0;padding-top:1px}
+.rv{font-size:.77rem;font-weight:600;color:var(--txt);word-break:break-word;flex:1}
+.rv.na{color:#9ca3af;font-weight:400;font-style:italic}
+.gbadge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.68rem;font-weight:700}
+.gM{background:#dbeafe;color:#1d4ed8}.gF{background:#fce7f3;color:#be185d}
+.gT{background:#f3e8ff;color:#7c3aed}
 
-    .raw-toggle{margin:8px 15px 0;padding:7px 10px;background:#f8f9ff;
-      border:1px solid #e8eaf6;border-radius:7px;cursor:pointer;font-size:.69rem;
-      color:var(--pri);font-weight:600;display:flex;align-items:center;
-      justify-content:space-between;user-select:none}
-    .raw-pre{margin:4px 15px 0;background:#1e293b;border-radius:7px;padding:10px;
-      font-family:'Courier New',monospace;font-size:.59rem;color:#94a3b8;
-      overflow-x:auto;white-space:pre-wrap;word-break:break-all;
-      display:none;line-height:1.65;max-height:190px;overflow-y:auto}
-    .raw-pre.show{display:block}
-    .xt{color:#7dd3fc}.xa{color:#86efac}.xv{color:#fde68a}.xc{color:#fb923c}
-    .dbg{margin:8px 15px 0;padding:9px 11px;background:#1e293b;border-radius:7px;
-      font-family:'Courier New',monospace;font-size:.59rem;color:#94a3b8;
-      line-height:1.7;display:none;max-height:220px;overflow-y:auto}
-    .dbg.show{display:block}
-    .dg-ok{color:#86efac}.dg-err{color:#fca5a5}.dg-inf{color:#7dd3fc}.dg-warn{color:#fde68a}
+/* ─── Mobile verification ─── */
+.vsec{padding:12px 15px;background:linear-gradient(135deg,#e8f5e9,#f1f8e9);
+  border-top:1px solid #c8e6c9;border-bottom:1px solid #c8e6c9}
+.vsec.email{background:linear-gradient(135deg,#e3f2fd,#e1f5fe);border-color:#b3e5fc}
+.vtitle{font-size:.68rem;font-weight:800;color:var(--ok);margin-bottom:9px;
+  display:flex;align-items:center;gap:5px;text-transform:uppercase;letter-spacing:.5px}
+.vinput-row{display:flex;gap:7px}
+.vinput{flex:1;padding:9px 11px;border:1.5px solid #a5d6a7;border-radius:8px;
+  font-size:.82rem;font-family:inherit;outline:none;background:#fff;
+  transition:border-color .2s}
+.vinput:focus{border-color:var(--ok)}
+.vinput.error{border-color:var(--err)}
+.vbtn{padding:9px 15px;background:var(--ok);color:#fff;border:none;
+  border-radius:8px;font-size:.79rem;font-weight:700;cursor:pointer;
+  white-space:nowrap;transition:background .2s}
+.vbtn:hover{background:#1b5e20}.vbtn:disabled{background:#9ca3af;cursor:not-allowed}
+.vresult{margin-top:8px;font-size:.78rem;font-weight:700;padding:7px 10px;
+  border-radius:7px;display:none}
+.vresult.show{display:block}
+.vresult.ok{background:#dcfce7;color:#14532d;border:1px solid #86efac}
+.vresult.fail{background:#fee2e2;color:#7f1d1d;border:1px solid #fca5a5}
+.vhash{font-size:.62rem;font-family:'Courier New',monospace;color:var(--dim);
+  margin-top:5px;word-break:break-all}
 
-    .fmt-pill{display:inline-block;font-size:.6rem;font-weight:700;
-      padding:1px 6px;border-radius:20px;margin-left:6px;vertical-align:middle}
-    .fp-xml{background:#c8e6c9;color:#1b5e20}.fp-bin{background:#ffe0b2;color:#bf360c}
+/* ─── Hash ─── */
+.hrow{display:flex;padding:6px 0;gap:8px;border-bottom:1px solid #f5f3ff;align-items:flex-start}
+.hk{font-size:.63rem;color:var(--dim);min-width:108px;flex-shrink:0}
+.hv{font-size:.59rem;font-family:'Courier New',monospace;color:#374151;
+  word-break:break-all;background:#f5f3ff;padding:2px 5px;border-radius:4px;flex:1}
 
-    .btn-again{display:block;width:calc(100% - 30px);margin:9px 15px 15px;
-      padding:10px;background:var(--pri);color:#fff;border:none;border-radius:9px;
-      font-size:.83rem;font-weight:700;cursor:pointer;text-align:center;transition:background .2s}
-    .btn-again:hover{background:#283593}
+/* ─── Debug / raw ─── */
+.toggle{margin:8px 15px 0;padding:7px 10px;background:#f5f5f5;
+  border:1px solid #e5e7eb;border-radius:7px;cursor:pointer;font-size:.68rem;
+  color:var(--pri);font-weight:600;display:flex;align-items:center;justify-content:space-between;
+  user-select:none}
+.dbgpanel,.rawpre{margin:4px 15px 0;background:#1e293b;border-radius:7px;
+  padding:10px;font-family:'Courier New',monospace;font-size:.58rem;color:#94a3b8;
+  line-height:1.65;display:none;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.dbgpanel.show,.rawpre.show{display:block}
+.dg-ok{color:#86efac}.dg-err{color:#fca5a5}.dg-inf{color:#7dd3fc}.dg-warn{color:#fde68a}
+.xa{color:#86efac}.xv{color:#fde68a}.xc{color:#fb923c}
 
-    /* ─── Spec / tips ─── */
-    .spec{background:var(--card);border-radius:16px;padding:15px;
-      margin-top:13px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
-    .spec h3{font-size:.82rem;font-weight:700;color:var(--pri);
-      margin-bottom:10px;display:flex;align-items:center;gap:6px}
-    .tip{display:flex;gap:9px;margin-bottom:8px}
-    .tipn{width:21px;height:21px;border-radius:50%;background:var(--pri);color:#fff;
-      font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;
-      flex-shrink:0;margin-top:1px}
-    .tipt{font-size:.73rem;color:var(--txt);line-height:1.55}
-    .tipt strong{color:var(--pri)}
-    .tipt code{background:#f3f4f6;padding:1px 4px;border-radius:3px;
-      font-size:.67rem;font-family:'Courier New',monospace;color:#374151}
-  </style>
+.again{display:block;width:calc(100% - 30px);margin:10px 15px 15px;
+  padding:10px;background:var(--pri);color:#fff;border:none;border-radius:10px;
+  font-size:.83rem;font-weight:700;cursor:pointer;text-align:center;transition:.2s}
+.again:hover{background:#283593}
+
+/* ─── Tips ─── */
+.tips{background:var(--card);border-radius:16px;padding:15px;
+  margin-top:13px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+.tips h3{font-size:.8rem;font-weight:700;color:var(--pri);margin-bottom:10px}
+.tip{display:flex;gap:8px;margin-bottom:8px}
+.tipn{width:20px;height:20px;border-radius:50%;background:var(--pri);color:#fff;
+  font-size:.63rem;font-weight:700;display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;margin-top:1px}
+.tipt{font-size:.72rem;color:var(--txt);line-height:1.55}
+.tipt strong{color:var(--pri)}
+.tipt code{background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:.67rem;font-family:monospace}
+
+/* ─── Modal for full photo ─t��─ */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
+  z-index:1000;align-items:center;justify-content:center}
+.overlay.show{display:flex}
+.overlay img{max-width:90vw;max-height:90vh;border-radius:10px;cursor:pointer}
+</style>
 </head>
 <body>
 
@@ -248,751 +297,984 @@
   <div class="hdr-ico">🪪</div>
   <div>
     <h1>Aadhaar QR Scanner</h1>
-    <p>Camera + image upload · Old XML &amp; New Secure QR · Official UIDAI Spec</p>
+    <p>Official UIDAI Spec · Photo · Mobile Verification · Camera + Upload</p>
   </div>
 </div>
-
-<div class="strip">
-  <span class="bge g">Old XML</span>
-  <span class="bge r">Secure QR: BigInt→zlib→0xFF→ISO-8859-1</span>
-  <span class="bge o">8-scale scan · ZXing fallback</span>
+<div class="pills">
+  <span class="pill pill-b">Old XML</span>
+  <span class="pill pill-g">Secure QR: BigInt→zlib→ISO-8859-1</span>
+  <span class="pill pill-o">Photo · Mobile Verify · Multi-scale</span>
 </div>
 
 <div class="wrap">
+  <div class="msg err" id="mErr"><svg class="msg-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg><span id="eTxt"></span></div>
+  <div class="msg inf" id="mInf"><svg class="msg-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span id="iTxt"></span></div>
+  <div class="msg warn" id="mWarn"><svg class="msg-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><span id="wTxt"></span></div>
 
-  <div class="msg err" id="msgErr"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg><span id="errTxt"></span></div>
-  <div class="msg inf" id="msgInf"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span id="infTxt"></span></div>
-  <div class="msg warn" id="msgWarn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><span id="warnTxt"></span></div>
-
-  <!-- Scanner card -->
-  <div class="card" id="scanCard">
+  <!-- Scanner -->
+  <div class="scard" id="scanCard">
     <div class="vp">
       <video id="video" playsinline muted autoplay></video>
-      <canvas id="scanCanvas"></canvas>
+      <canvas id="sc"></canvas>
       <div class="dimov"></div>
-      <div class="fw"><div class="sf"><div class="sl"></div><div class="br"></div><div class="bl"></div></div></div>
-      <div class="okflash" id="flash"></div>
-      <div class="stat" id="stat">Tap Start Scanning or drop an image below</div>
+      <div class="finder"><div class="sq"><div class="scanline"></div><div class="br"></div><div class="bl"></div></div></div>
+      <div class="okflash" id="fl"></div>
+      <div class="camstat" id="cst">Tap Start Camera or upload an image below</div>
     </div>
-
-    <div class="ctrls">
-      <button class="cb" id="btnFlash" onclick="toggleFlash()">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>
-        <span id="flashLbl">Flash</span>
+    <div class="camctrl">
+      <button class="ccb" id="btnFlash" onclick="toggleFlash()">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg><span id="flashLbl">Flash</span>
       </button>
-      <div class="cdv"></div>
-      <button class="cb on" id="btnFocus" onclick="toggleFocus()">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm-7 7H3v4h4v-2H5v-2zm14 0v2h-2v2h4v-4h-2zM5 5h2V3H3v4h2V5zm11-2v2h2v2h2V3h-4z"/></svg>
-        <span>Focus</span>
+      <div class="cdiv"></div>
+      <button class="ccb on" id="btnFocus" onclick="toggleFocus()">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm-7 7H3v4h4v-2H5v-2zm14 0v2h-2v2h4v-4h-2zM5 5h2V3H3v4h2V5zm11-2v2h2v2h2V3h-4z"/></svg><span>Focus</span>
       </button>
-      <div class="cdv"></div>
-      <button class="cb" onclick="stopCamera(true)">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        <span>Close</span>
+      <div class="cdiv"></div>
+      <button class="ccb" onclick="stopCam(true)">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg><span>Close</span>
       </button>
     </div>
-
-    <div class="sw">
-      <button class="btn" id="btnStart" onclick="startScanner()">
-        <div class="sp" id="spin"></div>
-        <span id="btnTxt">📷 Start Camera Scanning</span>
+    <div class="sbw">
+      <button class="sbtn" id="camBtn" onclick="startCam()">
+        <div class="sp" id="spi"></div><span id="camLbl">📷 Start Camera Scanning</span>
       </button>
     </div>
-
-    <!-- Upload area -->
-    <div class="upload-section">
-      <span class="upload-label">Or upload an Aadhaar image</span>
-      <div class="upload-drop" id="dropZone"
+    <div class="upsec">
+      <span class="uplbl">Or upload an Aadhaar image</span>
+      <div class="drop" id="dropZ"
            ondragover="event.preventDefault();this.classList.add('drag')"
            ondragleave="this.classList.remove('drag')"
-           ondrop="handleDrop(event)">
-        <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(event)" />
-        <div class="upload-ico">🖼️</div>
-        <div class="upload-txt">Click or drag &amp; drop an image</div>
-        <div class="upload-sub">Photo of Aadhaar card · PDF screenshot · Any QR image</div>
+           ondrop="onDrop(event)">
+        <input type="file" id="fi" accept="image/*" onchange="onFile(event)"/>
+        <div class="drop-ico">🖼️</div>
+        <div class="drop-t">Click or drag &amp; drop image</div>
+        <div class="drop-s">Aadhaar card photo · e-Aadhaar PDF screenshot · QR image</div>
       </div>
     </div>
-
-    <!-- Scan progress preview -->
-    <div class="preview-box" id="previewBox">
-      <div class="preview-inner">
-        <img id="previewImg" alt="uploaded" />
-        <div class="preview-info">
-          <div class="preview-name" id="prevName"></div>
-          <div class="preview-dim" id="prevDim"></div>
-          <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
-          <div class="prog-label" id="progLabel">Preparing…</div>
-          <div class="scan-attempts" id="attChips"></div>
+    <div class="prog-box" id="progBox">
+      <div class="prog-inner">
+        <img id="prevImg" alt="preview"/>
+        <div class="prog-info">
+          <div class="prog-name" id="pName"></div>
+          <div class="prog-dim" id="pDim"></div>
+          <div class="bar"><div class="fill" id="pFill"></div></div>
+          <div class="plab" id="pLab">Preparing…</div>
+          <div class="chips" id="pChips"></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Result card -->
-  <div class="res" id="resCard">
-    <div class="rh" id="resHdr">
-      <div class="rico" id="resIco"></div>
-      <div><h2 id="resTitle"></h2><p id="resTime"></p></div>
+  <!-- Result -->
+  <div class="rcard" id="resCard">
+    <div class="rh" id="rHdr">
+      <div class="rico" id="rIco"></div>
+      <div><h2 id="rTitle"></h2><p id="rTime"></p></div>
     </div>
 
-    <div class="photo-row">
-      <div class="photo-ph" id="photoPh">👤</div>
-      <img id="aadhaarPhoto" alt="Aadhaar photo" />
-      <div class="uid-info">
+    <!-- Photo + UID -->
+    <div class="phrow">
+      <div class="photo-wrap">
+        <div class="photo-ph" id="phPh"><span>👤</span><span>Photo</span></div>
+        <img id="aPhoto" alt="Aadhaar photo" onclick="openPhotoModal()"/>
+        <div class="photo-badge" id="phBadge">✓ JPEG2000</div>
+        <button class="photo-decode-btn" id="phDecBtn" onclick="decodePhoto()">🔓 Decode Photo</button>
+      </div>
+      <div class="uid-block">
         <label>Aadhaar Number</label>
-        <div class="uid-dig" id="uidDisp"></div>
-        <div class="uid-sub" id="uidTs"></div>
-        <span class="uid-ind" id="emailMobileInd" style="display:none"></span>
+        <div class="uid-num"><span class="uid-msk">✱✱✱✱ ✱✱✱✱ </span><span id="uid4"></span></div>
+        <div class="uid-ts" id="uidTs"></div>
+        <div class="uid-ind none" id="uidInd" style="display:none"></div>
       </div>
     </div>
 
+    <!-- Personal -->
     <div class="sec">
-      <div class="sec-t"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Personal</div>
-      <div class="fr"><span class="fk">Full Name</span><span class="fv" id="fName"></span></div>
-      <div class="fr"><span class="fk">Gender</span><span class="fv" id="fGender"></span></div>
-      <div class="fr"><span class="fk">Date of Birth</span><span class="fv" id="fDob"></span></div>
-      <div class="fr"><span class="fk">Year of Birth</span><span class="fv" id="fYob"></span></div>
-      <div class="fr"><span class="fk">Care Of</span><span class="fv" id="fCo"></span></div>
+      <div class="stitle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Personal Information</div>
+      <div class="row"><span class="rk">Full Name</span><span class="rv" id="fName"></span></div>
+      <div class="row"><span class="rk">Gender</span><span class="rv" id="fGender"></span></div>
+      <div class="row"><span class="rk">Date of Birth</span><span class="rv" id="fDob"></span></div>
+      <div class="row"><span class="rk">Year of Birth</span><span class="rv" id="fYob"></span></div>
+      <div class="row"><span class="rk">Care Of</span><span class="rv" id="fCo"></span></div>
     </div>
 
+    <!-- Address -->
     <div class="sec">
-      <div class="sec-t"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>Address</div>
-      <div class="fr"><span class="fk">House / Flat</span><span class="fv" id="fHouse"></span></div>
-      <div class="fr"><span class="fk">Street</span><span class="fv" id="fStreet"></span></div>
-      <div class="fr"><span class="fk">Landmark</span><span class="fv" id="fLm"></span></div>
-      <div class="fr"><span class="fk">Locality</span><span class="fv" id="fLoc"></span></div>
-      <div class="fr"><span class="fk">Village / Town</span><span class="fv" id="fVtc"></span></div>
-      <div class="fr"><span class="fk">Post Office</span><span class="fv" id="fPo"></span></div>
-      <div class="fr"><span class="fk">Sub-District</span><span class="fv" id="fSd"></span></div>
-      <div class="fr"><span class="fk">District</span><span class="fv" id="fDist"></span></div>
-      <div class="fr"><span class="fk">State</span><span class="fv" id="fState"></span></div>
-      <div class="fr"><span class="fk">PIN Code</span><span class="fv" id="fPin"></span></div>
+      <div class="stitle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>Address</div>
+      <div class="row"><span class="rk">House / Flat</span><span class="rv" id="fHouse"></span></div>
+      <div class="row"><span class="rk">Street</span><span class="rv" id="fStreet"></span></div>
+      <div class="row"><span class="rk">Landmark</span><span class="rv" id="fLm"></span></div>
+      <div class="row"><span class="rk">Locality</span><span class="rv" id="fLoc"></span></div>
+      <div class="row"><span class="rk">Village / Town / City</span><span class="rv" id="fVtc"></span></div>
+      <div class="row"><span class="rk">Post Office</span><span class="rv" id="fPo"></span></div>
+      <div class="row"><span class="rk">Sub-District</span><span class="rv" id="fSd"></span></div>
+      <div class="row"><span class="rk">District</span><span class="rv" id="fDist"></span></div>
+      <div class="row"><span class="rk">State</span><span class="rv" id="fState"></span></div>
+      <div class="row"><span class="rk">PIN Code</span><span class="rv" id="fPin"></span></div>
     </div>
 
+    <!-- Mobile verification (shown if mobile hash exists) -->
+    <div class="vsec" id="vMobile" style="display:none">
+      <div class="vtitle">📱 Verify Mobile Number</div>
+      <div class="vinput-row">
+        <input class="vinput" id="mobileIn" type="tel" maxlength="10" placeholder="Enter 10-digit mobile number"/>
+        <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
+      </div>
+      <div class="vresult" id="mVerRes"></div>
+      <div class="vhash" id="mHashDisp"></div>
+    </div>
+
+    <!-- Email verification (shown if email hash exists) -->
+    <div class="vsec email" id="vEmail" style="display:none">
+      <div class="vtitle" style="color:#1565c0">📧 Verify Email Address</div>
+      <div class="vinput-row">
+        <input class="vinput" id="emailIn" type="email" placeholder="Enter email address" style="border-color:#81d4fa"/>
+        <button class="vbtn" id="eVerBtn" onclick="verifyEmail()" style="background:#1565c0">Verify</button>
+      </div>
+      <div class="vresult" id="eVerRes"></div>
+      <div class="vhash" id="eHashDisp"></div>
+    </div>
+
+    <!-- Hash data (collapsed) -->
     <div class="sec" id="hashSec" style="display:none">
-      <div class="sec-t">🔐 Hash Data</div>
-      <div class="hash-row"><span class="hk">Mobile hash</span><span class="hv" id="mobileHash"></span></div>
-      <div class="hash-row"><span class="hk">Email hash</span><span class="hv" id="emailHash"></span></div>
+      <div class="stitle">🔐 Stored Hashes (from QR)</div>
+      <div class="hrow"><span class="hk">Mobile hash</span><span class="hv" id="mHashRaw"></span></div>
+      <div class="hrow"><span class="hk">Email hash</span><span class="hv" id="eHashRaw"></span></div>
     </div>
 
     <div style="height:6px"></div>
-    <div class="raw-toggle" onclick="toggleDbg()"><span>🔧 Debug / Parse Log</span><span id="dbgArr">▼</span></div>
-    <div class="dbg" id="dbgPanel"></div>
-    <div class="raw-toggle" style="margin-top:5px" onclick="toggleRaw()"><span>📄 Raw Segments</span><span id="rawArr">▼</span></div>
-    <pre class="raw-pre" id="rawPre"></pre>
-    <button class="btn-again" onclick="resetScanner()">🔄 Scan Another</button>
+    <div class="toggle" onclick="togDbg()"><span>🔧 Debug / Parse Log</span><span id="dbgArr">▼</span></div>
+    <div class="dbgpanel" id="dbgP"></div>
+    <div class="toggle" style="margin-top:5px" onclick="togRaw()"><span>📄 Raw Segments</span><span id="rawArr">▼</span></div>
+    <pre class="rawpre" id="rawP"></pre>
+    <button class="again" onclick="resetAll()">🔄 Scan Another</button>
   </div>
 
-  <!-- Tips -->
-  <div class="spec">
-    <h3>📋 Tips for best results</h3>
-    <div class="tip"><div class="tipn">1</div>
-      <div class="tipt"><strong>Use a clear, flat photo</strong> — Aadhaar card on a dark background, QR fully visible, no glare or shadow over the QR</div>
-    </div>
-    <div class="tip"><div class="tipn">2</div>
-      <div class="tipt"><strong>Higher resolution = better</strong> — Aadhaar Secure QR is very dense (177×177 cells). Scanner tries 8 different zoom levels automatically</div>
-    </div>
-    <div class="tip"><div class="tipn">3</div>
-      <div class="tipt"><strong>Try the e-Aadhaar PDF screenshot</strong> — screenshot from mAadhaar app or UIDAI portal gives the best image quality</div>
-    </div>
-    <div class="tip"><div class="tipn">4</div>
-      <div class="tipt"><strong>Algorithm</strong>: QR scan → decimal string → <code>BigInt</code> → bytes → <code>pako.inflate</code> (zlib) → split by <code>0xFF</code> → ISO-8859-1 strings → 16 fields</div>
-    </div>
+  <div class="tips">
+    <h3>💡 Tips for best results</h3>
+    <div class="tip"><div class="tipn">1</div><div class="tipt"><strong>Use e-Aadhaar screenshot</strong> — screenshot from mAadhaar app or UIDAI portal gives the sharpest QR image</div></div>
+    <div class="tip"><div class="tipn">2</div><div class="tipt"><strong>Dense QR code</strong> — Aadhaar Secure QR is 177×177 cells. Scanner tries 10+ zoom levels automatically. Keep the full QR visible</div></div>
+    <div class="tip"><div class="tipn">3</div><div class="tipt"><strong>Photo</strong> — stored as JPEG2000 (JP2) inside the QR. Decoded via embedded PDF engine. Click photo to enlarge</div></div>
+    <div class="tip"><div class="tipn">4</div><div class="tipt"><strong>Mobile verification</strong> — SHA-256 applied N times (N = last digit of Aadhaar) then compared with stored hash per UIDAI spec</div></div>
   </div>
+</div>
+
+<!-- Photo modal -->
+<div class="overlay" id="photoModal" onclick="closeModal()">
+  <img id="modalImg" alt="Aadhaar photo enlarged"/>
 </div>
 
 <script>
 /*
- * ═══════════════════════════════════════════════════════════════════
- * QR DETECTION STRATEGY
- *  Aadhaar Secure QR ≈ version 40 (177×177 modules) — very dense
- *  jsQR needs ≥2px/module = ≥354px QR area
- *  Strategy:
- *    Pass 1-8:  jsQR at scales [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25]
- *    Pass 9:    jsQR with grayscale + contrast enhancement
- *    Pass 10:   ZXing MultiFormatReader (same as Android APK)
- *    Pass 11:   ZXing with inverted image
- * ═══════════════════════════════════════════════════════════════════
+ * ═══════════════════════════════════════════════════════════════
+ *  COMPLETE AADHAAR QR SCANNER — All features
+ *  Camera + Upload · JPEG2000 photo · Mobile/Email verification
+ * ═══════════════════════════════════════════════════════════════
  */
 
-let stream = null, scanning = false, rafId = null;
-let flashOn = false, afOn = true, vTrack = null;
-let rawOpen = false, dbgOpen = false;
+// PDF.js worker for JPEG2000 decoding
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js';
+}
 
-const video  = document.getElementById('video');
-const canvas = document.getElementById('scanCanvas');
-const ctx    = canvas.getContext('2d', { willReadFrequently: true });
-const statEl = document.getElementById('stat');
-const flash  = document.getElementById('flash');
+let stream=null, scanning=false, rafId=null, flashOn=false, afOn=true, vTrack=null;
+let rawOpen=false, dbgOpen=false;
+let gRefId='', gMobileHash='', gEmailHash='', gIndicator=0;
+let gPhotoBytes=null;
 
-// Scales to try — we go LARGE first because Aadhaar QR needs high res
-const SCALES = [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25];
+const video=document.getElementById('video');
+const sc=document.getElementById('sc');
+const ctx=sc.getContext('2d',{willReadFrequently:true});
+const cst=document.getElementById('cst');
+const fl=document.getElementById('fl');
 
-window.addEventListener('load', () => {
-  if (typeof jsQR  === 'undefined') showErr('jsQR failed to load. Check internet.');
-  if (typeof pako  === 'undefined') showErr('pako (zlib) failed to load. Check internet.');
-});
+const SCALES=[4,3,2,1.5,1,0.75,0.5,0.25];
+const dbgLines=[];
 
-// ─── Camera ────────────────────────────────────────────────────────
-async function startScanner() {
+// ═════════════════════════════════════════════════════════════════
+// CAMERA SCANNING — multi-scale tick
+// ═════════════════════════════════════════════════════════════════
+async function startCam() {
   if (scanning) return;
-  hideMsg(); setLoading(true);
+  hideMsg(); setBtnLd(true);
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      audio: false
-    });
+      video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
     video.srcObject = stream;
     await video.play();
     vTrack = stream.getVideoTracks()[0];
     scanning = true;
-    statEl.textContent = 'Point camera at Aadhaar QR Code';
-    setLoading(false); setBtnState('scanning');
-    tickCamera();
-  } catch (e) {
-    setLoading(false);
-    const msg = e.name === 'NotAllowedError'
-      ? 'Camera permission denied — use the upload option below instead.'
-      : e.name === 'NotFoundError'
-      ? 'No camera found — use the upload option below.'
-      : 'Camera error: ' + e.message;
-    showErr(msg);
+    cst.textContent = 'Point camera at the Aadhaar QR code';
+    setBtnLd(false); setBtnState('scanning');
+    tick();
+  } catch(e) {
+    setBtnLd(false);
+    showErr(e.name==='NotAllowedError'
+      ? 'Camera denied — use the upload option below'
+      : e.name==='NotFoundError'
+      ? 'No camera found — use upload below'
+      : 'Camera: '+e.message);
   }
 }
 
-function tickCamera() {
+function tick() {
   if (!scanning) return;
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-    const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(id.data, id.width, id.height, { inversionAttempts: 'attemptBoth' });
+  if (video.readyState===video.HAVE_ENOUGH_DATA) {
+    sc.width=video.videoWidth; sc.height=video.videoHeight;
+    ctx.drawImage(video,0,0);
+
+    // Try 1x first (fast path)
+    let code = jsQR(ctx.getImageData(0,0,sc.width,sc.height).data, sc.width, sc.height, {inversionAttempts:'attemptBoth'});
+
+    // Try 2x upscale (for small/dense QR)
+    if (!code) {
+      const w2=sc.width*2, h2=sc.height*2;
+      const c2=document.createElement('canvas'); c2.width=w2; c2.height=h2;
+      c2.getContext('2d').drawImage(sc,0,0,w2,h2);
+      code = jsQR(c2.getContext('2d').getImageData(0,0,w2,h2).data, w2, h2, {inversionAttempts:'attemptBoth'});
+    }
+
+    // ZXing fallback for camera frame
+    if (!code && typeof ZXing!=='undefined') code = tryZXing(sc);
+
     if (code) {
-      scanning = false; cancelAnimationFrame(rafId);
-      doFlash(); statEl.textContent = '✅ Found! Parsing…';
-      parseQR(code.data, code.binaryData);
+      scanning=false; cancelAnimationFrame(rafId);
+      doFlash(); cst.textContent='✅ QR Found! Parsing…';
+      parseQR(code.data||code.text||'', code.binaryData||null);
       return;
     }
   }
-  rafId = requestAnimationFrame(tickCamera);
+  rafId = requestAnimationFrame(tick);
 }
 
-// ─── File upload handlers ──────────────────────────────────────────
-function handleDrop(e) {
-  e.preventDefault();
-  document.getElementById('dropZone').classList.remove('drag');
-  const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) processFile(file);
-  else showWarn('Please drop an image file (JPG, PNG, etc.)');
+// ═════════════════════════════════════════════════════════════════
+// IMAGE UPLOAD — 10+ scale passes + ZXing
+// ═════════════════════════════════════════════════════════════════
+function onDrop(e){
+  e.preventDefault(); document.getElementById('dropZ').classList.remove('drag');
+  const f=e.dataTransfer.files[0];
+  if(f&&f.type.startsWith('image/')) processFile(f); else showWarn('Drop an image file.');
 }
-function handleFileSelect(e) {
-  const file = e.target.files[0];
-  if (file) processFile(file);
-  e.target.value = '';
-}
+function onFile(e){const f=e.target.files[0]; if(f) processFile(f); e.target.value='';}
 
-// ─── Process uploaded image ────────────────────────────────────────
 function processFile(file) {
-  hideMsg(); stopCamera(false);
-  showPreview(file);
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    document.getElementById('prevDim').textContent =
-      `${img.naturalWidth} × ${img.naturalHeight}px`;
-    scanImageAllScales(img, file.name, url);
-  };
-  img.onerror = () => { showErr('Could not load image.'); hidePreview(); };
-  img.src = url;
+  hideMsg(); stopCam(false); showProg(file);
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{ document.getElementById('pDim').textContent=`${img.naturalWidth}×${img.naturalHeight}px`; scanAllScales(img,url); };
+  img.onerror=()=>{showErr('Cannot load image.');hideProg();};
+  img.src=url;
 }
 
-// ─── Multi-scale + multi-method scanning ──────────────────────────
-async function scanImageAllScales(img, filename, url) {
-  const chips = document.getElementById('attChips');
-  const fill  = document.getElementById('progFill');
-  const label = document.getElementById('progLabel');
+async function scanAllScales(img, url) {
+  const chips=document.getElementById('pChips');
+  const fill=document.getElementById('pFill');
+  const lab=document.getElementById('pLab');
+  const W=img.naturalWidth, H=img.naturalHeight;
 
-  const W = img.naturalWidth, H = img.naturalHeight;
+  const attempts=[
+    ...SCALES.map(s=>({lbl:`${s}x`,scale:s,method:'jsqr',grey:false})),
+    {lbl:'grey',scale:1,method:'jsqr',grey:true},
+    {lbl:'grey2x',scale:2,method:'jsqr',grey:true},
+    ...(typeof ZXing!=='undefined'?[
+      {lbl:'ZXing',scale:1,method:'zxing',grey:false},
+      {lbl:'ZXing2x',scale:2,method:'zxing',grey:false}
+    ]:[])
+  ];
 
-  // Build attempt list: jsQR at multiple scales + grayscale + ZXing
-  const attempts = SCALES.map(s => ({ label: `${s}x`, scale: s, method: 'jsqr', grey: false }));
-  attempts.push({ label: 'grey', scale: 1, method: 'jsqr', grey: true });
-  attempts.push({ label: 'grey2x', scale: 2, method: 'jsqr', grey: true });
-  if (typeof ZXing !== 'undefined') {
-    attempts.push({ label: 'ZXing', scale: 1, method: 'zxing', grey: false });
-    attempts.push({ label: 'ZXing↑', scale: 2, method: 'zxing', grey: false });
-  }
+  chips.innerHTML=attempts.map((_,i)=>`<span class="chip p" id="chip${i}">${attempts[i].lbl}</span>`).join('');
 
-  // Render chips
-  chips.innerHTML = attempts.map((a, i) =>
-    `<span class="att-chip pending" id="chip${i}">${a.label}</span>`
-  ).join('');
-
-  let found = null;
-  for (let i = 0; i < attempts.length; i++) {
-    const a = attempts[i];
-    const pct = Math.round((i / attempts.length) * 100);
-    fill.style.width = pct + '%';
-    label.textContent = `Trying ${a.label} (${pct}%)…`;
-    document.getElementById('chip' + i).className = 'att-chip pending';
-    statEl.textContent = `Scanning at ${a.label}…`;
-
-    // Yield to browser to update UI
-    await new Promise(r => setTimeout(r, 10));
-
+  let found=null;
+  for(let i=0;i<attempts.length;i++){
+    const a=attempts[i];
+    const pct=Math.round(i/attempts.length*100);
+    fill.style.width=pct+'%';
+    lab.textContent=`Trying ${a.lbl} (${pct}%)…`;
+    cst.textContent=`Scanning at ${a.lbl}…`;
+    await sleep(8);
     try {
-      const scaledW = Math.min(Math.round(W * a.scale), 6000);
-      const scaledH = Math.min(Math.round(H * a.scale), 6000);
-      canvas.width = scaledW; canvas.height = scaledH;
-      ctx.drawImage(img, 0, 0, scaledW, scaledH);
-
-      let imgData = ctx.getImageData(0, 0, scaledW, scaledH);
-
-      if (a.grey) imgData = toGrayscale(imgData);
-
-      let code = null;
-      if (a.method === 'jsqr') {
-        code = jsQR(imgData.data, scaledW, scaledH, { inversionAttempts: 'attemptBoth' });
-      } else if (a.method === 'zxing') {
-        code = tryZXing(canvas);
-      }
-
-      if (code) {
-        document.getElementById('chip' + i).className = 'att-chip ok';
-        fill.style.width = '100%';
-        label.textContent = `✅ QR found at ${a.label}!`;
-        doFlash();
-        found = code;
-        break;
-      } else {
-        document.getElementById('chip' + i).className = 'att-chip fail';
-      }
-    } catch (e) {
-      document.getElementById('chip' + i).className = 'att-chip fail';
-    }
+      const sw=Math.min(Math.round(W*a.scale),7000), sh=Math.min(Math.round(H*a.scale),7000);
+      sc.width=sw; sc.height=sh;
+      ctx.drawImage(img,0,0,sw,sh);
+      let id=ctx.getImageData(0,0,sw,sh);
+      if(a.grey) id=toGrey(id);
+      let code=null;
+      if(a.method==='jsqr') code=jsQR(id.data,sw,sh,{inversionAttempts:'attemptBoth'});
+      else code=tryZXing(sc);
+      if(code){
+        document.getElementById('chip'+i).className='chip ok';
+        fill.style.width='100%'; lab.textContent=`✅ QR found at ${a.lbl}!`;
+        doFlash(); found=code; break;
+      } else { document.getElementById('chip'+i).className='chip f'; }
+    } catch(e){ document.getElementById('chip'+i).className='chip f'; }
   }
 
   URL.revokeObjectURL(url);
-
-  if (found) {
-    statEl.textContent = '✅ Parsing QR data…';
-    parseQR(found.data || found.text || '', found.binaryData || null);
+  if(found){
+    cst.textContent='✅ Parsing…';
+    parseQR(found.data||found.text||'', found.binaryData||null);
   } else {
-    fill.style.width = '100%';
-    label.textContent = '❌ No QR detected in any attempt';
-    statEl.textContent = 'No QR code found';
-    showErr(
-      'No QR code detected after ' + attempts.length + ' scan attempts. ' +
-      'Make sure the QR code is: (1) fully visible and unobstructed, ' +
-      '(2) the image is in focus and not blurry, ' +
-      '(3) the Aadhaar QR (black/white grid pattern) is in the photo. ' +
-      'Try a screenshot from the mAadhaar app or UIDAI portal for best results.'
-    );
+    fill.st�le.width='100%'; lab.textContent='❌ No QR detected';
+    cst.textContent='No QR found';
+    showErr('No QR code detected after '+attempts.length+' attempts. Make sure the Aadhaar QR (black/white grid) is fully visible and in focus. Best: use mAadhaar app screenshot or UIDAI portal PDF screenshot.');
     setBtnState('idle');
   }
 }
 
-// Convert ImageData to grayscale (improves detection on some images)
-function toGrayscale(imgData) {
-  const d = new Uint8ClampedArray(imgData.data);
-  for (let i = 0; i < d.length; i += 4) {
-    const g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-    // Boost contrast: stretch to 0-255
-    const c = Math.min(255, Math.max(0, (g - 128) * 1.4 + 128));
-    d[i] = d[i+1] = d[i+2] = c;
+function toGrey(id){
+  const d=new Uint8ClampedArray(id.data);
+  for(let i=0;i<d.length;i+=4){
+    const g=Math.min(255,Math.max(0,(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]-128)*1.5+128));
+    d[i]=d[i+1]=d[i+2]=g;
   }
-  return new ImageData(d, imgData.width, imgData.height);
+  return new ImageData(d,id.width,id.height);
 }
 
-// ZXing fallback (same library used by the Android APK via ZXing Java)
-function tryZXing(cvs) {
-  try {
-    const reader = new ZXing.MultiFormatReader();
-    reader.setHints(new Map([[ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.QR_CODE]]]));
-    const lum = new ZXing.HTMLCanvasElementLuminanceSource(cvs);
-    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-    const result = reader.decode(bmp);
-    // ZXing returns result.getText() and result.getRawBytes()
-    return { data: result.getText(), binaryData: result.getRawBytes() };
-  } catch(e) {
-    // ZXing throws NotFoundException when not found — not an error
-    return null;
-  }
+function tryZXing(cvs){
+  try{
+    const r=new ZXing.MultiFormatReader();
+    r.setHints(new Map([[ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.QR_CODE]]]));
+    const lum=new ZXing.HTMLCanvasElementLuminanceSource(cvs);
+    const res=r.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum)));
+    return{data:res.getText(),binaryData:res.getRawBytes()};
+  }catch(e){return null;}
 }
 
-// ═════════════════════════════════════════════════════════════════════
-// MAIN PARSER — all 3 Aadhaar QR formats
-// ═════════════════════════════════════════════════════════════════════
-const dbgLines = [];
+// ═════════════════════════════════════════════════════════════════
+// MAIN PARSER
+// ═════════════════════════════════════════════════════════════════
+function parseQR(raw, binary) {
+  dbgLines.length=0;
+  const s=raw.trim();
+  dbg('inf',`QR: ${s.length} chars | bin: ${binary?binary.length:0}B`);
+  dbg('inf',`Preview: "${s.slice(0,80)}"`);
 
-function parseQR(rawStr, binaryData) {
-  dbgLines.length = 0;
-  const raw = (rawStr || '').trim();
-  dbg('inf', `Raw length: ${raw.length} chars | binaryData: ${binaryData ? binaryData.length : 0} bytes`);
-  dbg('inf', `Preview: "${raw.slice(0, 80)}"`);
+  if(tryXML(s)) return;
 
-  // ── A: Old XML ──────────────────────────────────────────────────
-  dbg('inf', '─── Format A: Old XML ───');
-  if (tryXml(raw)) return;
-
-  // ── B: Official UIDAI Secure QR (numeric → BigInt → zlib → 0xFF) ─
-  dbg('inf', '─── Format B: UIDAI Secure QR (BigInt+zlib) ───');
-  if (/^\d+$/.test(raw) && raw.length > 20) {
-    dbg('ok', `Numeric string: ${raw.length} digits`);
-    const rawBytes = bigIntToBytes(raw);
-    if (rawBytes) {
-      dbg('inf', `Converted to ${rawBytes.length} bytes. First 8: ${hexStr(rawBytes, 8)}`);
-      // Try zlib inflate (required by spec)
-      try {
-        const dec = pako.inflate(rawBytes);
-        dbg('ok', `zlib inflate: ${rawBytes.length} → ${dec.length} bytes`);
-        if (trySecureQR(dec, 'B-zip')) return;
-      } catch(e) {
-        dbg('warn', `zlib failed: ${e.message} — trying raw bytes`);
-        if (trySecureQR(rawBytes, 'B-raw')) return;
+  if(/^\d+$/.test(s)&&s.length>20){
+    dbg('ok',`Numeric: ${s.length} digits`);
+    const bytes=bigToBytes(s);
+    if(bytes){
+      dbg('inf',`Bytes: ${bytes.length}B. First 8: ${h8(bytes)}`);
+      try{
+        const dec=pako.inflate(bytes);
+        dbg('ok',`zlib: ${bytes.length}→${dec.length}B`);
+        if(trySecure(dec,'B-zip')) return;
+      }catch(e){
+        dbg('warn','zlib fail: '+e.message);
+        if(trySecure(bytes,'B-raw')) return;
       }
     }
   }
 
-  // ── C: Byte-mode binaryData ─────────────────────────────────────
-  dbg('inf', '─── Format C: Byte-mode binaryData ───');
-  if (binaryData && binaryData.length > 20) {
-    const arr = binaryData instanceof Uint8Array ? binaryData : new Uint8Array(binaryData);
-    dbg('inf', `binaryData: ${arr.length} bytes. First 8: ${hexStr(arr, 8)}`);
-    try {
-      const dec = pako.inflate(arr);
-      dbg('ok', `zlib inflate binaryData: ${arr.length} → ${dec.length} bytes`);
-      if (trySecureQR(dec, 'C-zip')) return;
-    } catch(e) {
-      dbg('warn', `binaryData inflate failed: ${e.message}`);
-      if (trySecureQR(arr, 'C-raw')) return;
-    }
+  if(binary&&binary.length>20){
+    const arr=binary instanceof Uint8Array?binary:new Uint8Array(binary);
+    dbg('inf',`Binary: ${arr.length}B. First 8: ${h8(arr)}`);
+    try{const d=pako.inflate(arr);dbg('ok','zlib bin ok');if(trySecure(d,'C-zip')) return;}
+    catch(e){dbg('warn','bin zlib fail');if(trySecure(arr,'C-raw')) return;}
   }
 
-  // ── D: Regex ────────────────────────────────────────────────────
-  dbg('inf', '─── Format D: Regex ───');
-  if (tryRegex(raw)) return;
-
-  dbg('err', 'All formats failed.');
-  showWarn('QR code read but no Aadhaar format matched. See debug panel.');
-  renderResult({}, 'fail', null, true);
+  if(tryRegex(s)) return;
+  dbg('err','All formats failed');
+  showWarn('QR scanned but Aadhaar format not recognised. Check debug log.');
+  render({},false,'fail');
 }
 
-// ── Format A: Old XML ──────────────────────────────────────────────
-function tryXml(raw) {
-  if (!raw.includes('PrintLetterBarcodeData') && !raw.trim().startsWith('<')) {
-    dbg('inf', 'No XML indicators'); return false;
-  }
-  try {
-    let x = raw.trim();
-    const idx = x.indexOf('<PrintLetterBarcodeData');
-    if (idx > 0) x = x.slice(idx);
-    const doc = new DOMParser().parseFromString(x, 'text/xml');
-    if (doc.querySelector('parsererror')) { dbg('err', 'XML parse error'); return false; }
-    const el = doc.querySelector('PrintLetterBarcodeData');
-    if (!el || !el.getAttribute('uid')) { dbg('err', 'PrintLetterBarcodeData/uid missing'); return false; }
-    dbg('ok', `Format A! uid=${el.getAttribute('uid')}`);
-    const f = { uid:ga(el,'uid'), name:ga(el,'name'), gender:ga(el,'gender'),
-      yob:ga(el,'yob'), dob:ga(el,'dob'), co:ga(el,'co'), house:ga(el,'house'),
-      street:ga(el,'street'), lm:ga(el,'lm'), loc:ga(el,'loc'), vtc:ga(el,'vtc'),
-      po:ga(el,'po'), dist:ga(el,'dist'), subdist:ga(el,'subdist'),
-      state:ga(el,'state'), pc:ga(el,'pc'), country:ga(el,'country') };
-    renderResult(f, 'xml', null);
-    return true;
-  } catch(e) { dbg('err', 'XML exception: '+e.message); return false; }
-}
-function ga(el,a){return(el.getAttribute(a)||'').trim();}
-
-// ── BigInt decimal → big-endian Uint8Array ─────────────────────────
-function bigIntToBytes(numStr) {
-  try {
-    let n = BigInt(numStr);
-    if (n === 0n) return new Uint8Array([0]);
-    const bytes = [];
-    while (n > 0n) { bytes.unshift(Number(n & 0xFFn)); n >>= 8n; }
-    return new Uint8Array(bytes);
-  } catch(e) { dbg('err', 'BigInt: '+e.message); return null; }
+// ─── Format A: Old XML ────────────────────────────────────────────
+function tryXML(s){
+  if(!s.includes('PrintLetterBarcodeData')&&!s.trim().startsWith('<')){dbg('inf','No XML');return false;}
+  try{
+    let x=s.trim(); const ix=x.indexOf('<PrintLetterBarcodeData'); if(ix>0) x=x.slice(ix);
+    const doc=new DOMParser().parseFromString(x,'text/xml');
+    if(doc.querySelector('parsererror')){dbg('err','XML parse err');return false;}
+    const el=doc.querySelector('PrintLetterBarcodeData');
+    if(!el||!el.getAttribute('uid')){dbg('err','No uid attr');return false;}
+    dbg('ok','Format A XML! uid='+el.getAttribute('uid'));
+    const g=a=>((el.getAttribute(a)||'').trim());
+    const f={uid:g('uid'),name:g('name'),gender:g('gender'),yob:g('yob'),dob:g('dob'),
+      co:g('co'),house:g('house'),street:g('street'),lm:g('lm'),loc:g('loc'),
+      vtc:g('vtc'),po:g('po'),dist:g('dist'),subdist:g('subdist'),
+      state:g('state'),pc:g('pc'),country:g('country')};
+    render(f,null,'xml'); return true;
+  }catch(e){dbg('err','XML: '+e.message);return false;}
 }
 
-// ── Format B/C: UIDAI Secure QR — split decompressed by 0xFF ───────
-// Official field order per UIDAI Spec Section 3.1:
-//  [0] indicator  [1] refId  [2] name  [3] dob  [4] gender
-//  [5] careOf  [6] district  [7] landmark  [8] house  [9] location
-//  [10] pinCode  [11] postOffice  [12] state  [13] street
-//  [14] subDistrict  [15] VTC  → then photo bytes → hashes → sig
-function trySecureQR(bytes, tag) {
-  try {
-    const dec = new TextDecoder('iso-8859-1');
-    const segs = [];
-    let cur = [];
-    for (let i = 0; i < bytes.length; i++) {
-      if (bytes[i] === 0xFF) { segs.push([...cur]); cur = []; }
-      else cur.push(bytes[i]);
+// ─── BigInt decimal → Uint8Array ─────────────────────────────────
+function bigToBytes(numStr){
+  try{
+    let n=BigInt(numStr); if(n===0n) return new Uint8Array([0]);
+    const b=[]; while(n>0n){b.unshift(Number(n&0xFFn));n>>=8n;} return new Uint8Array(b);
+  }catch(e){dbg('err','BigInt: '+e.message);return null;}
+}
+
+// ─── Format B/C: UIDAI Secure QR ─────────────────────────────────
+// Official field order (UIDAI Spec 3.1):
+//  [0]indicator [1]refId [2]name [3]dob [4]gender [5]careOf
+//  [6]district [7]landmark [8]house [9]location [10]pinCode
+//  [11]postOffice [12]state [13]street [14]subDistrict [15]VTC
+function trySecure(bytes, tag){
+  try{
+    const dec=new TextDecoder('iso-8859-1');
+    const segs=[]; let cur=[];
+    for(let i=0;i<bytes.length;i++){
+      if(bytes[i]===0xFF){segs.push([...cur]);cur=[];}else cur.push(bytes[i]);
     }
-    if (cur.length) segs.push([...cur]);
-
-    dbg('inf', `[${tag}] Split → ${segs.length} segments`);
-    segs.slice(0, 17).forEach((s, i) => {
-      const t = dec.decode(new Uint8Array(s)).replace(/[\x00-\x1f\x7f]/g,'·');
-      dbg('inf', `  [${i}] ${s.length}B: "${t.slice(0,60)}"`);
+    if(cur.length) segs.push([...cur]);
+    dbg('inf',`[${tag}] ${segs.length} segs`);
+    segs.slice(0,17).forEach((s,i)=>{
+      const t=dec.decode(new Uint8Array(s)).replace(/[\x00-\x1f\x7f]/g,'·');
+      dbg('inf',`  [${i}] ${s.length}B: "${t.slice(0,60)}"`);
     });
+    if(segs.length<16){dbg('err',`Only ${segs.length} segs`);return false;}
 
-    if (segs.length < 16) { dbg('err', `Only ${segs.length} segs, need ≥16`); return false; }
+    const ss=segs.map(b=>dec.decode(new Uint8Array(b)));
+    const ind=ss[0].trim(), refId=ss[1].trim(), name=ss[2].trim(), dob=ss[3].trim(),
+      gender=ss[4].trim(), co=ss[5].trim(), dist=ss[6].trim(), lm=ss[7].trim(),
+      house=ss[8].trim(), loc=ss[9].trim(), pc=ss[10].trim(), po=ss[11].trim(),
+      state=ss[12].trim(), street=ss[13].trim(), subdist=ss[14].trim(), vtc=ss[15].trim();
 
-    const s = segs.map(b => dec.decode(new Uint8Array(b)));
-    const indicator = s[0].trim();
-    const refId     = s[1].trim();
-    const name      = s[2].trim();
-    const dob       = s[3].trim();
-    const gender    = s[4].trim();
-    const co        = s[5].trim();
-    const dist      = s[6].trim();
-    const lm        = s[7].trim();
-    const house     = s[8].trim();
-    const loc       = s[9].trim();
-    const pc        = s[10].trim();
-    const po        = s[11].trim();
-    const state     = s[12].trim();
-    const street    = s[13].trim();
-    const subdist   = s[14].trim();
-    const vtc       = s[15].trim();
+    if(!name||!/[a-zA-Z\u0900-\u097F]/.test(name)){
+      dbg('err',`[${tag}] bad name: "${name}"`);return false;
+    }
+    dbg('ok',`[${tag}] ✓ name="${name}" dob="${dob}" gender="${gender}"`);
 
-    // Validate: name must contain letters
-    if (!name || !/[a-zA-Z\u0900-\u097F]/.test(name)) {
-      dbg('err', `[${tag}] name empty or non-letter: "${name}"`); return false;
+    const indicator=parseInt(ind)||0;
+    const emailP=indicator===1||indicator===3;
+    const mobileP=indicator===2||indicator===3;
+
+    // Calculate byte positions
+    // After seg[15] end: find 0xFF separator position then photo starts
+    let pos=0;
+    for(let i=0;i<=15;i++){pos+=segs[i].length;if(i<15)pos++;}
+    const photoStart=pos+1; // +1 for the 0xFF delimiter after seg[15]
+
+    // From END: 256B sig
+    const sigStart=bytes.length-256;
+    // Mobile hash: 32B before sig (if mobileP)
+    const mobStart=mobileP?sigStart-32:null;
+    // Email hash: 32B before mobile (if emailP)
+    const emStart=emailP?(mobileP?sigStart-64:sigStart-32):null;
+    // Photo ends at first hash (or signature if no hashes)
+    const photoEnd=emStart!==null?emStart:(mobStart!==null?mobStart:sigStart);
+
+    // Extract mobile hash
+    let mobileHex='', emailHex='';
+    if(mobStart!==null&&mobStart>=0){
+      mobileHex=Array.from(bytes.slice(mobStart,mobStart+32)).map(b=>b.toString(16).padStart(2,'0')).join('');
+      dbg('inf',`Mobile hash: ${mobileHex.slice(0,16)}…`);
+    }
+    if(emStart!==null&&emStart>=0){
+      emailHex=Array.from(bytes.slice(emStart,emStart+32)).map(b=>b.toString(16).padStart(2,'0')).join('');
+      dbg('inf',`Email hash: ${emailHex.slice(0,16)}…`);
     }
 
-    dbg('ok', `[${tag}] SUCCESS! name="${name}" dob="${dob}" gender="${gender}"`);
+    // Extract photo bytes
+    let photoBytes=null;
+    if(photoStart<photoEnd&&photoEnd-photoStart>50){
+      photoBytes=bytes.slice(photoStart,photoEnd);
+      dbg('inf',`Photo: ${photoBytes.length}B. Magic: ${h8(photoBytes,4)}`);
+    }
 
     // Extract year from DOB
-    let yob = '';
-    if (dob) { const p = dob.split(/[-\/. ]/); yob = p.length===3 ? (p[2].length===4?p[2]:p[0].length===4?p[0]:'') : ''; }
-
-    // Email/mobile indicator
-    const ind = parseInt(indicator) || 0;
-    const emailP  = ind === 1 || ind === 3;
-    const mobileP = ind === 2 || ind === 3;
-
-    // Calculate photo range
-    // After seg[15] end: photo starts
-    // From END: 256B sig, 32B mobile hash (if mobileP), 32B email hash (if emailP)
-    let pos = 0;
-    for (let i = 0; i <= 15; i++) { pos += segs[i].length; if (i < 15) pos++; }
-    const photoStart = pos + 1; // +1 for the 0xFF after seg[15]
-    const sigStart   = bytes.length - 256;
-    const mHash      = mobileP ? bytes.slice(sigStart - 32, sigStart) : null;
-    const eHash      = emailP  ? bytes.slice(sigStart - (mobileP?64:32), sigStart - (mobileP?32:0)) : null;
-    const photoEnd   = eHash ? (sigStart - (mobileP?64:32)) : mHash ? sigStart - 32 : sigStart;
-
-    const mobileHashHex = mHash ? Array.from(mHash).map(b=>b.toString(16).padStart(2,'0')).join('') : '';
-    const emailHashHex  = eHash ? Array.from(eHash).map(b=>b.toString(16).padStart(2,'0')).join('') : '';
-
-    // Photo
-    let photoUrl = null;
-    if (photoStart < photoEnd && photoEnd - photoStart > 50) {
-      const photoBytes = bytes.slice(photoStart, photoEnd);
-      dbg('inf', `Photo: ${photoBytes.length} bytes. Magic: ${hexStr(photoBytes, 4)}`);
-      // JPEG2000 magic: 0000000C6A502020 or FF4FFF51
-      const blob = new Blob([photoBytes], { type: 'image/jpeg' }); // try as JPEG first
-      photoUrl = URL.createObjectURL(blob);
-    }
+    let yob='';
+    if(dob){const p=dob.split(/[-\/. ]/);yob=p.length===3?(p[2].length===4?p[2]:p[0].length===4?p[0]:''):'';}
 
     // Parse refId: first 4 = last 4 of UID, rest = DDMMYYYYHHMMSSsss
-    const uidLast4 = refId.slice(0, 4);
-    const ts = refId.slice(4);
-    let tsFormatted = '';
-    if (ts.length >= 12) {
-      tsFormatted = `Data as on ${ts.slice(0,2)}/${ts.slice(2,4)}/${ts.slice(4,8)} ${ts.slice(8,10)}:${ts.slice(10,12)}`;
-    }
+    const uidLast4=refId.slice(0,4);
+    const ts=refId.slice(4);
+    let tsStr='';
+    if(ts.length>=12) tsStr=`Data as on ${ts.slice(0,2)}/${ts.slice(2,4)}/${ts.slice(4,8)} ${ts.slice(8,10)}:${ts.slice(10,12)}`;
 
-    const f = { uid:uidLast4||refId, name, dob, gender, yob, co,
-      house, street, lm, loc, vtc, po, dist, subdist, state, pc, country:'India',
-      refId, indicator:ind, mobileHashHex, emailHashHex, photoUrl, tsFormatted };
+    const f={uid:uidLast4||refId,name,dob,gender,yob,co,house,street,lm,loc,vtc,
+      po,dist,subdist,state,pc,country:'India',
+      refId,indicator,mobileHex,emailHex,tsStr,photoBytes};
 
-    renderResult(f, 'bin', buildSegDisplay(s, tag, bytes.length));
+    const raw=buildSegDisplay(ss,tag,bytes.length);
+    render(f,raw,'bin');
     return true;
-  } catch(e) { dbg('err', `[${tag}] ${e.message}`); return false; }
+  }catch(e){dbg('err',`[${tag}] ${e.message}`);return false;}
 }
 
-// ── Format D: regex ────────────────────────────────────────────────
-function tryRegex(raw) {
-  if (!raw.includes('uid=')) return false;
-  const pick = a => { const m = raw.match(new RegExp(a+'="([^"]*)"')); return m?m[1].trim():''; };
-  const uid = pick('uid'); if (!uid) return false;
-  dbg('ok', 'Regex uid='+uid);
-  const f = {uid,name:pick('name'),gender:pick('gender'),yob:pick('yob'),dob:pick('dob'),
-    co:pick('co'),house:pick('house'),street:pick('street'),lm:pick('lm'),loc:pick('loc'),
-    vtc:pick('vtc'),po:pick('po'),dist:pick('dist'),subdist:pick('subdist'),state:pick('state'),
-    pc:pick('pc'),country:pick('country')};
-  renderResult(f,'xml',null); return true;
+// ─── Format D: Regex fallback ─────────────────────────────────────
+function tryRegex(s){
+  if(!s.includes('uid=')) return false;
+  const g=a=>{const m=s.match(new RegExp(a+'="([^"]*)"'));return m?m[1].trim():'';};
+  const uid=g('uid'); if(!uid) return false;
+  dbg('ok','Regex uid='+uid);
+  const f={uid,name:g('name'),gender:g('gender'),yob:g('yob'),dob:g('dob'),
+    co:g('co'),house:g('house'),street:g('street'),lm:g('lm'),loc:g('loc'),
+    vtc:g('vtc'),po:g('po'),dist:g('dist'),subdist:g('subdist'),state:g('state'),pc:g('pc'),country:g('country')};
+  render(f,null,'xml'); return true;
 }
 
-// ═════════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════
 // RENDER RESULT
-// ═════════════════════════════════════════════════════════════════════
-function renderResult(f, fmt, rawDisplay, failed) {
-  stopCamera(false);
+// ═════════════════════════════════════════════════════════════════
+function render(f, rawDisp, fmt) {
+  stopCam(false);
 
-  document.getElementById('resHdr').className = 'rh ' + fmt;
-  document.getElementById('resIco').textContent = failed?'⚠️':(fmt==='xml'?'✅':'🔐');
-  document.getElementById('resTitle').innerHTML =
-    (failed?'Parse Failed':(fmt==='xml'?'Old XML Format':'UIDAI Secure QR')) +
-    (!failed?`<span class="fmt-pill fp-${fmt==='xml'?'xml':'bin'}">${fmt==='xml'?'XML':'Secure'}</span>`:'');
-  document.getElementById('resTime').textContent =
-    'Decoded ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  // Store globals for verification
+  gRefId=f.refId||''; gMobileHash=f.mobileHex||''; gEmailHash=f.emailHex||'';
+  gIndicator=f.indicator||0; gPhotoBytes=f.photoBytes||null;
+
+  // Header
+  const fmtLabel={xml:'Old XML Format',bin:'UIDAI Secure QR Decoded',fail:'Parse Failed'};
+  const ico={xml:'✅',bin:'🔐',fail:'⚠️'};
+  document.getElementById('rHdr').className='rh '+fmt;
+  document.getElementById('rIco').textContent=ico[fmt];
+  document.getElementById('rTitle').innerHTML=fmtLabel[fmt]+
+    (fmt!=='fail'?`<span class="rpill rp-${fmt}">${fmt==='xml'?'XML':'Secure'}</span>`:'');
+  document.getElementById('rTime').textContent='Decoded '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 
   // UID
-  const uid = (f.uid||'').replace(/\D/g,'');
-  const last4 = uid.length>=4?uid.slice(-4):(f.uid||'').slice(-4);
-  document.getElementById('uidDisp').innerHTML =
-    `<span class="um">✱✱✱✱ ✱✱✱✱ </span>${last4||'—'}`;
-  document.getElementById('uidTs').textContent = f.tsFormatted || (f.refId?'Ref: '+f.refId:'');
+  document.getElementById('uid4').textContent=(f.uid||'').replace(/\D/g,'').slice(-4)||'—';
+  document.getElementById('uidTs').textContent=f.tsStr||'';
 
-  const indEl = document.getElementById('emailMobileInd');
-  const indMap = {0:'No mobile/email in QR',1:'Email only',2:'Mobile only',3:'Mobile + Email'};
-  if (f.indicator !== undefined) { indEl.textContent = indMap[f.indicator]||''; indEl.style.display=''; }
-  else indEl.style.display='none';
-
-  // Photo
-  const ph = document.getElementById('photoPh'), pi = document.getElementById('aadhaarPhoto');
-  if (f.photoUrl) {
-    pi.src = f.photoUrl; pi.style.display='block'; ph.style.display='none';
-    pi.onerror = () => { pi.style.display='none'; ph.style.display='flex'; };
-  } else { pi.style.display='none'; ph.style.display='flex'; }
+  const indMap={0:'No mobile/email in QR',1:'Email only in QR',2:'Mobile only in QR',3:'Mobile + Email in QR'};
+  const indEl=document.getElementById('uidInd');
+  if(f.indicator!==undefined){
+    indEl.textContent=indMap[f.indicator]||'';
+    indEl.className='uid-ind '+(f.indicator>0?'present':'none');
+    indEl.style.display='';
+  } else indEl.style.display='none';
 
   // Gender badge
-  const gMap={M:'Male',F:'Female',T:'Transgender'};
+  const gmap={M:'Male',F:'Female',T:'Transgender'};
   const gEl=document.getElementById('fGender');
-  if(f.gender&&gMap[f.gender]) gEl.innerHTML=`<span class="gb g${f.gender}">${gMap[f.gender]}</span>`;
-  else setF(gEl,f.gender);
+  if(f.gender&&gmap[f.gender]) gEl.innerHTML=`<span class="gbadge g${f.gender}">${gmap[f.gender]}</span>`;
+  else setRV(gEl,f.gender);
 
-  setF(document.getElementById('fName'),f.name);
-  setF(document.getElementById('fDob'),f.dob);
-  setF(document.getElementById('fYob'),f.yob);
-  setF(document.getElementById('fCo'),f.co);
-  setF(document.getElementById('fHouse'),f.house);
-  setF(document.getElementById('fStreet'),f.street);
-  setF(document.getElementById('fLm'),f.lm);
-  setF(document.getElementById('fLoc'),f.loc);
-  setF(document.getElementById('fVtc'),f.vtc);
-  setF(document.getElementById('fPo'),f.po);
-  setF(document.getElementById('fSd'),f.subdist);
-  setF(document.getElementById('fDist'),f.dist);
-  setF(document.getElementById('fState'),f.state);
-  setF(document.getElementById('fPin'),f.pc);
+  setRV(document.getElementById('fName'),f.name);
+  setRV(document.getElementById('fDob'),f.dob);
+  setRV(document.getElementById('fYob'),f.yob);
+  setRV(document.getElementById('fCo'),f.co);
+  setRV(document.getElementById('fHouse'),f.house);
+  setRV(document.getElementById('fStreet'),f.street);
+  setRV(document.getElementById('fLm'),f.lm);
+  setRV(document.getElementById('fLoc'),f.loc);
+  setRV(document.getElementById('fVtc'),f.vtc);
+  setRV(document.getElementById('fPo'),f.po);
+  setRV(document.getElementById('fSd'),f.subdist);
+  setRV(document.getElementById('fDist'),f.dist);
+  setRV(document.getElementById('fState'),f.state);
+  setRV(document.getElementById('fPin'),f.pc);
 
-  const hs = document.getElementById('hashSec');
-  if (f.mobileHashHex||f.emailHashHex) {
+  // Mobile verification section
+  const emailP=gIndicator===1||gIndicator===3;
+  const mobileP=gIndicator===2||gIndicator===3;
+  const vMob=document.getElementById('vMobile');
+  const vEm=document.getElementById('vEmail');
+  if(mobileP&&gMobileHash){
+    vMob.style.display='';
+    document.getElementById('mHashDisp').textContent='Stored: '+gMobileHash;
+    document.getElementById('mVerRes').className='vresult';
+    document.getElementById('mobileIn').value='';
+  } else vMob.style.display='none';
+  if(emailP&&gEmailHash){
+    vEm.style.display='';
+    document.getElementById('eHashDisp').textContent='Stored: '+gEmailHash;
+    document.getElementById('eVerRes').className='vresult';
+    document.getElementById('emailIn').value='';
+  } else vEm.style.display='none';
+
+  // Hash section (raw)
+  const hs=document.getElementById('hashSec');
+  if(gMobileHash||gEmailHash){
     hs.style.display='';
-    document.getElementById('mobileHash').textContent = f.mobileHashHex||'—';
-    document.getElementById('emailHash').textContent  = f.emailHashHex||'—';
+    document.getElementById('mHashRaw').textContent=gMobileHash||'—';
+    document.getElementById('eHashRaw').textContent=gEmailHash||'—';
   } else hs.style.display='none';
 
-  document.getElementById('rawPre').innerHTML = rawDisplay||'—';
-  document.getElementById('dbgPanel').innerHTML =
-    dbgLines.map(l=>`<span class="dg-${l.t}">${esc(l.m)}</span>`).join('\n');
+  // Photo
+  displayPhoto(f.photoBytes);
 
-  if (failed||dbgLines.some(l=>l.t==='err')) {
-    document.getElementById('dbgPanel').classList.add('show');
+  // Debug
+  document.getElementById('rawP').innerHTML=rawDisp||'—';
+  document.getElementById('dbgP').innerHTML=
+    dbgLines.map(l=>`<span class="dg-${l.t}">${esc(l.m)}</span>`).join('\n');
+  if(fmt==='fail'||dbgLines.some(l=>l.t==='err')){
+    document.getElementById('dbgP').classList.add('show');
     document.getElementById('dbgArr').textContent='▲'; dbgOpen=true;
   }
 
-  hidePreview();
+  hideProg();
   document.getElementById('scanCard').style.display='none';
   document.getElementById('resCard').classList.add('show');
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
-function setF(el,v){const t=(v||'').trim();if(t){el.textContent=t;el.className='fv';}else{el.textContent='Not available';el.className='fv na';}}
-function buildSegDisplay(s, tag, total) {
-  const names=['indicator','referenceId','name','dob','gender','careOf','district','landmark','house','location','pinCode','postOffice','state','street','subDistrict','VTC'];
-  const lines=[`<span class="xc">// ${tag} | ${total}B decompressed | ${s.length} segs</span>`,``];
-  s.slice(0,16).forEach((v,i)=>lines.push(`<span class="xa">seg[${i}] ${names[i]||'?'}</span>=<span class="xv">"${esc(v.replace(/[\x00-\x1f\x7f]/g,'·').slice(0,90))}"</span>`));
-  return lines.join('\n');
-}
-function hexStr(arr, n) { return Array.from(arr.slice?arr.slice(0,n):Array.from(arr).slice(0,n)).map(b=>b.toString(16).padStart(2,'0')).join(' '); }
-function dbg(t,m){dbgLines.push({t,m});}
-function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// ═════════════════════════════════════════════════════════════════
+// JPEG2000 PHOTO DISPLAY
+// Uses: native jp2 blob → raw JPEG check → pdfjs PDF embedding
+// ═════════════════════════════════════════════════════════════════
+function displayPhoto(photoBytes) {
+  const ph=document.getElementById('phPh');
+  const pi=document.getElementById('aPhoto');
+  const badge=document.getElementById('phBadge');
+  const decBtn=document.getElementById('phDecBtn');
 
-// ─── Preview UI ────────────────────────────────────────────────────
-function showPreview(file) {
-  const box = document.getElementById('previewBox');
-  const img = document.getElementById('previewImg');
-  const url = URL.createObjectURL(file);
-  img.src = url; img.onload = () => URL.revokeObjectURL(url);
-  document.getElementById('prevName').textContent = file.name;
-  document.getElementById('prevDim').textContent = `${Math.round(file.size/1024)}KB`;
-  document.getElementById('progFill').style.width = '0%';
-  document.getElementById('progLabel').textContent = 'Preparing…';
-  document.getElementById('attChips').innerHTML = '';
-  box.classList.add('show');
-  document.getElementById('msgErr').classList.remove('show');
-}
-function hidePreview() { document.getElementById('previewBox').classList.remove('show'); }
+  // Reset
+  pi.style.display='none'; ph.style.display='flex';
+  badge.style.display='none'; decBtn.style.display='none';
+  if(pi.src) URL.revokeObjectURL(pi.src);
 
-// ─── Camera / flash / focus ────────────────────────────────────────
-async function toggleFlash() {
-  if (!vTrack) { showInf('Start camera first.'); return; }
-  const caps = vTrack.getCapabilities?vTrack.getCapabilities():{};
-  if (!caps.torch) { showInf('Flash not supported.'); return; }
-  flashOn = !flashOn;
-  await vTrack.applyConstraints({advanced:[{torch:flashOn}]}).catch(()=>{flashOn=!flashOn;});
-  document.getElementById('btnFlash').classList.toggle('on',flashOn);
-  document.getElementById('flashLbl').textContent = flashOn?'Flash ON':'Flash';
+  if(!photoBytes||photoBytes.length<10){
+    ph.innerHTML='<span>👤</span><span>No photo in QR</span>'; return;
+  }
+
+  ph.innerHTML='<span>👤</span><span>Loading…</span>';
+
+  // Check magic bytes
+  const m0=photoBytes[0], m1=photoBytes[1], m2=photoBytes[2], m3=photoBytes[3];
+  const isJPEG = m0===0xFF&&m1===0xD8;
+  const isJPC  = m0===0xFF&&m1===0x4F; // JPEG2000 codestream
+  const isJP2  = m0===0x00&&m1===0x00&&m2===0x00&&m3===0x0C; // JP2 file
+
+  dbg('inf',`Photo magic: ${h8(photoBytes,4)} (${isJPEG?'JPEG':isJPC?'JPC':isJP2?'JP2':'unknown'})`);
+
+  if(isJPEG){
+    // Regular JPEG — works everywhere
+    const blob=new Blob([photoBytes],{type:'image/jpeg'});
+    const url=URL.createObjectURL(blob);
+    pi.src=url;
+    pi.onload=()=>{ph.style.display='none';pi.style.display='block';badge.style.display='block';badge.textContent='✓ JPEG';};
+    pi.onerror=()=>{URL.revokeObjectURL(url);ph.innerHTML='<span>👤</span><span>Photo error</span>';};
+    return;
+  }
+
+  if(isJPC||isJP2){
+    // JPEG2000 — try native first (Safari), then pdfjs (Chrome/Firefox)
+    const mimeType=isJP2?'image/jp2':'image/jp2';
+    const blob=new Blob([photoBytes],{type:mimeType});
+    const url=URL.createObjectURL(blob);
+    pi.src=url;
+    pi.onload=()=>{
+      ph.style.display='none'; pi.style.display='block';
+      badge.style.display='block'; badge.textContent='✓ JP2';
+      dbg('ok','Photo: native jp2 render worked (Safari)');
+    };
+    pi.onerror=async()=>{
+      URL.revokeObjectURL(url);
+      dbg('warn','Native jp2 failed — trying pdfjs decode');
+      // Try pdfjs JPEG2000 decode (Chrome/Firefox)
+      const dataUrl=await decodeJP2viaPDFjs(photoBytes);
+      if(dataUrl){
+        pi.src=dataUrl; pi.onload=()=>{ph.style.display='none';pi.style.display='block';badge.style.display='block';badge.textContent='✓ JP2 decoded';};
+        pi.onerror=()=>{ph.innerHTML='<span>👤</span><span>Decode failed</span>';decBtn.style.display='block';};
+      } else {
+        ph.innerHTML='<span>📷</span><span>Tap Decode</span>';
+        decBtn.style.display='block';
+        dbg('warn','pdfjs also failed — showing decode button');
+      }
+    };
+    return;
+  }
+
+  // Unknown format — try as JPEG anyway
+  const blob=new Blob([photoBytes],{type:'image/jpeg'});
+  const url=URL.createObjectURL(blob);
+  pi.src=url;
+  pi.onload=()=>{ph.style.display='none';pi.style.display='block';badge.style.display='block';badge.textContent='✓ Photo';};
+  pi.onerror=()=>{
+    URL.revokeObjectURL(url);
+    ph.innerHTML='<span>👤</span><span>Tap Decode</span>';
+    decBtn.style.display='block';
+  };
 }
-async function toggleFocus() {
-  afOn=!afOn;
-  document.getElementById('btnFocus').classList.toggle('on',afOn);
-  if (vTrack) {
-    const caps = vTrack.getCapabilities?vTrack.getCapabilities():{};
-    if (caps.focusMode) await vTrack.applyConstraints({advanced:[{focusMode:afOn?'continuous':'manual'}]}).catch(()=>{});
+
+// Manual decode button (triggered by user)
+async function decodePhoto() {
+  if(!gPhotoBytes) return;
+  document.getElementById('phDecBtn').textContent='Decoding…';
+  document.getElementById('phDecBtn').disabled=true;
+  const dataUrl=await decodeJP2viaPDFjs(gPhotoBytes);
+  const pi=document.getElementById('aPhoto');
+  const ph=document.getElementById('phPh');
+  if(dataUrl){
+    pi.src=dataUrl;
+    pi.style.display='block'; ph.style.display='none';
+    document.getElementById('phBadge').style.display='block';
+    document.getElementById('phBadge').textContent='✓ Decoded';
+    document.getElementById('phDecBtn').style.display='none';
+  } else {
+    // Offer download
+    const blob=new Blob([gPhotoBytes],{type:'image/jp2'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='aadhaar_photo.jp2'; a.click();
+    URL.revokeObjectURL(url);
+    document.getElementById('phDecBtn').textContent='📥 Download JP2';
+    document.getElementById('phDecBtn').disabled=false;
+    ph.innerHTML='<span>📷</span><span>Open in Safari or Photos app</span>';
   }
 }
-function doFlash() { flash.classList.add('on'); setTimeout(()=>flash.classList.remove('on'),400); }
-function stopCamera(resetUI) {
-  scanning=false; cancelAnimationFrame(rafId);
-  if (stream){stream.getTracks().forEach(t=>t.stop());stream=null;vTrack=null;}
-  video.srcObject=null;
-  if (resetUI){setBtnState('idle');statEl.textContent='Camera stopped.';}
+
+// ─── Decode JPEG2000 via PDF.js trick: embed JP2 in minimal PDF ───
+async function decodeJP2viaPDFjs(jp2Bytes) {
+  if(typeof pdfjsLib==='undefined') return null;
+  try{
+    // Parse dimensions from JPEG2000 header
+    const dim=getJP2Dim(jp2Bytes);
+    const W=dim?dim.w:200, H=dim?dim.h:200;
+    dbg('inf',`JP2 dims: ${W}×${H}`);
+
+    // Create minimal valid PDF with embedded JPXDecode image
+    const pdfBytes=buildMinimalPDF(jp2Bytes, W, H);
+    dbg('inf',`Mini PDF: ${pdfBytes.length}B`);
+
+    const loadTask=pdfjsLib.getDocument({data:pdfBytes, verbosity:0});
+    const pdf=await loadTask.promise;
+    const page=await pdf.getPage(1);
+    const vp=page.getViewport({scale:1});
+
+    const cnv=document.createElement('canvas');
+    cnv.width=Math.round(vp.width); cnv.height=Math.round(vp.height);
+    const cx=cnv.getContext('2d');
+    await page.render({canvasContext:cx,viewport:vp}).promise;
+    dbg('ok',`pdfjs JP2 decoded: ${cnv.width}×${cnv.height}`);
+    return cnv.toDataURL('image/png');
+  }catch(e){
+    dbg('err','pdfjs decode: '+e.message);
+    return null;
+  }
 }
-function resetScanner() {
+
+// Parse JPEG2000 image dimensions from header bytes
+function getJP2Dim(b){
+  try{
+    // JPC codestream: SOC(FF4F) then SIZ(FF51)
+    if(b[0]===0xFF&&b[1]===0x4F&&b[2]===0xFF&&b[3]===0x51){
+      // SIZ marker: [4-5]=Lsiz, [6-9]=Rsiz, [10-13]=Xsiz(width), [14-17]=Ysiz(height)
+      const w=(b[10]<<24|b[11]<<16|b[12]<<8|b[13])>>>0;
+      const h=(b[14]<<24|b[15]<<16|b[16]<<8|b[17])>>>0;
+      if(w>0&&w<4000&&h>0&&h<4000) return{w,h};
+    }
+    // JP2 file: search for embedded codestream (SOC marker)
+    for(let i=0;i<Math.min(b.length-4,1000);i++){
+      if(b[i]===0xFF&&b[i+1]===0x4F&&b[i+2]===0xFF&&b[i+3]===0x51){
+        const w=(b[i+10]<<24|b[i+11]<<16|b[i+12]<<8|b[i+13])>>>0;
+        const h=(b[i+14]<<24|b[i+15]<<16|b[i+16]<<8|b[i+17])>>>0;
+        if(w>0&&w<4000&&h>0&&h<4000) return{w,h};
+      }
+    }
+  }catch(e){}
+  return null;
+}
+
+// Build a minimal valid PDF file containing JPEG2000 image
+// PDF structure: Catalog → Pages → Page → Image XObject (JPXDecode)
+function buildMinimalPDF(imgBytes, W, H) {
+  const E=new TextEncoder();
+  const parts=[];
+  const offsets=new Array(7).fill(0);
+  let pos=0;
+
+  const add=(bytes)=>{parts.push(bytes);pos+=bytes.length;};
+  const addStr=(s)=>add(E.encode(s));
+
+  // Header
+  addStr('%PDF-1.4\n');
+
+  // Obj 1: Catalog
+  offsets[1]=pos; addStr(`1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n`);
+  // Obj 2: Pages
+  offsets[2]=pos; addStr(`2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n`);
+  // Obj 3: Page
+  offsets[3]=pos; addStr(`3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${W} ${H}]/Resources<</XObject<</Im0 4 0 R>>>>/Contents 5 0 R>>\nendobj\n`);
+  // Obj 4: Image XObject with JPXDecode
+  offsets[4]=pos;
+  const imgHdr=E.encode(`4 0 obj\n<</Type/XObject/Subtype/Image/Width ${W}/Height ${H}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/JPXDecode/Length ${imgBytes.length}>>\nstream\n`);
+  const imgFtr=E.encode('\nendstream\nendobj\n');
+  add(imgHdr); add(imgBytes); add(imgFtr);
+  // Obj 5: Page contents
+  const content=`q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`;
+  offsets[5]=pos; addStr(`5 0 obj\n<</Length ${content.length}>>\nstream\n${content}\nendstream\nendobj\n`);
+
+  // Cross-reference table
+  const xrefPos=pos;
+  let xref='xref\n0 6\n0000000000 65535 f \n';
+  for(let i=1;i<=5;i++) xref+=offsets[i].toString().padStart(10,'0')+' 00000 n \n';
+  addStr(xref+`trailer\n<</Root 1 0 R/Size 6>>\nstartxref\n${xrefPos}\n%%EOF\n`);
+
+  const total=parts.reduce((s,p)=>s+p.length,0);
+  const result=new Uint8Array(total);
+  let off=0;
+  for(const p of parts){result.set(p,off);off+=p.length;}
+  return result;
+}
+
+function openPhotoModal(){
+  const pi=document.getElementById('aPhoto');
+  if(!pi.src||pi.style.display==='none') return;
+  document.getElementById('modalImg').src=pi.src;
+  document.getElementById('photoModal').classList.add('show');
+}
+function closeModal(){ document.getElementById('photoModal').classList.remove('show'); }
+
+// ═════════════════════════════════════════════════════════════════
+// MOBILE / EMAIL HASH VERIFICATION
+// UIDAI Spec: SHA-256(mobile) × N, N = last digit of Aadhaar (refId[3])
+// if digit 0 or 1 → N=1; if 2-9 → N=digit
+// ═════════════════════════════════════════════════════════════════
+async function verifyMobile(){
+  const inp=document.getElementById('mobileIn');
+  const res=document.getElementById('mVerRes');
+  const btn=document.getElementById('mVerBtn');
+  const mobile=inp.value.trim();
+
+  if(!/^\d{10}$/.test(mobile)){
+    inp.classList.add('error');
+    showVRes(res,'❌ Enter a valid 10-digit mobile number',false); return;
+  }
+  inp.classList.remove('error');
+  if(!gMobileHash){showVRes(res,'❌ No mobile hash in QR',false);return;}
+
+  btn.disabled=true; btn.textContent='Verifying…';
+  try{
+    const lastDigit=parseInt(gRefId.charAt(3))||0;
+    const iters=lastDigit<=1?1:lastDigit;
+    dbg('inf',`Mobile verify: last digit=${lastDigit}, iterations=${iters}`);
+
+    let data=new TextEncoder().encode(mobile);
+    for(let i=0;i<iters;i++){
+      const buf=await crypto.subtle.digest('SHA-256',data);
+      data=new Uint8Array(buf);
+    }
+    const computed=Array.from(data).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const match=computed.toLowerCase()===gMobileHash.toLowerCase();
+    dbg(match?'ok':'err',`Mobile: computed=${computed.slice(0,16)}… stored=${gMobileHash.slice(0,16)}… → ${match?'MATCH':'MISMATCH'}`);
+    if(match) showVRes(res,`✅ Mobile number verified! (${iters} SHA-256 iteration${iters>1?'s':''})`,true);
+    else showVRes(res,'❌ Mobile number does not match',false);
+  }catch(e){showVRes(res,'❌ Verification error: '+e.message,false);}
+  btn.disabled=false; btn.textContent='Verify';
+}
+
+async function verifyEmail(){
+  const inp=document.getElementById('emailIn');
+  const res=document.getElementById('eVerRes');
+  const btn=document.getElementById('eVerBtn');
+  const email=inp.value.trim().toLowerCase();
+
+  if(!email.includes('@')){inp.classList.add('error');showVRes(res,'❌ Enter a valid email address',false);return;}
+  inp.classList.remove('error');
+  if(!gEmailHash){showVRes(res,'❌ No email hash in QR',false);return;}
+
+  btn.disabled=true; btn.textContent='Verifying…';
+  try{
+    const lastDigit=parseInt(gRefId.charAt(3))||0;
+    const iters=lastDigit<=1?1:lastDigit;
+    let data=new TextEncoder().encode(email);
+    for(let i=0;i<iters;i++){
+      const buf=await crypto.subtle.digest('SHA-256',data);
+      data=new Uint8Array(buf);
+    }
+    const computed=Array.from(data).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const match=computed.toLowerCase()===gEmailHash.toLowerCase();
+    if(match) showVRes(res,`✅ Email address verified! (${iters} SHA-256 iteration${iters>1?'s':''})`,true);
+    else showVRes(res,'❌ Email does not match',false);
+  }catch(e){showVRes(res,'❌ Error: '+e.message,false);}
+  btn.disabled=false; btn.textContent='Verify';
+}
+
+function showVRes(el,msg,ok){el.textContent=msg;el.className='vresult show '+(ok?'ok':'fail');}
+
+// ═════════════════════════════════════════════════════════════════
+// UTILITIES
+// ═════════════════════════════════════════════════════════════════
+function setRV(el,v){const t=(v||'').trim();if(t){el.textContent=t;el.className='rv';}else{el.textContent='Not available';el.className='rv na';}}
+function h8(arr,n=8){return Array.from(arr.slice?arr.slice(0,n):Array.from(arr).slice(0,n)).map(b=>b.toString(16).padStart(2,'0')).join(' ');}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function dbg(t,m){dbgLines.push({t,m});}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+function doFlash(){fl.classList.add('on');setTimeout(()=>fl.classList.remove('on'),500);}
+
+function buildSegDisplay(ss,tag,total){
+  const names=['indicator','referenceId','name','dob','gender','careOf','district','landmark','house','location','pinCode','postOffice','state','street','subDistrict','VTC'];
+  const lines=[`<span class="xc">// ${tag} | ${total}B | ${ss.length} segs</span>`,``];
+  ss.slice(0,16).forEach((v,i)=>lines.push(
+    `<span class="xa">[${i}] ${names[i]||'?'}</span> = <span class="xv">"${esc(v.replace(/[\x00-\x1f\x7f]/g,'·').slice(0,80))}"</span>`
+  ));
+  return lines.join('\n');
+}
+
+// ─── Camera helpers ─────────────────────────────────────────────
+async function toggleFlash(){
+  if(!vTrack){showInf('Start camera first.');return;}
+  const caps=vTrack.getCapabilities?vTrack.getCapabilities():{};
+  if(!caps.torch){showInf('Flash not supported.');return;}
+  flashOn=!flashOn;
+  await vTrack.applyConstraints({advanced:[{torch:flashOn}]}).catch(()=>{flashOn=!flashOn;});
+  document.getElementById('btnFlash').classList.toggle('on',flashOn);
+  document.getElementById('flashLbl').textContent=flashOn?'Flash ON':'Flash';
+}
+async function toggleFocus(){
+  afOn=!afOn; document.getElementById('btnFocus').classList.toggle('on',afOn);
+  if(vTrack){const c=vTrack.getCapabilities?vTrack.getCapabilities():{};
+    if(c.focusMode) await vTrack.applyConstraints({advanced:[{focusMode:afOn?'continuous':'manual'}]}).catch(()=>{});}
+}
+function stopCam(resetUI){
+  scanning=false; cancelAnimationFrame(rafId);
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;vTrack=null;}
+  video.srcObject=null;
+  if(resetUI){setBtnState('idle');cst.textContent='Camera stopped.';}
+}
+function resetAll(){
   document.getElementById('resCard').classList.remove('show');
   document.getElementById('scanCard').style.display='block';
-  setBtnState('idle'); statEl.textContent='Tap Start Scanning or drop an image below';
+  setBtnState('idle');cst.textContent='Tap Start Camera or upload an image below';
   rawOpen=false;dbgOpen=false;
-  document.getElementById('rawPre').classList.remove('show');
-  document.getElementById('dbgPanel').classList.remove('show');
-  document.getElementById('rawArr').textContent='▼'; document.getElementById('dbgArr').textContent='▼';
-  const pi=document.getElementById('aadhaarPhoto');
+  document.getElementById('rawP').classList.remove('show');
+  document.getElementById('dbgP').classList.remove('show');
+  document.getElementById('rawArr').textContent='▼';
+  document.getElementById('dbgArr').textContent='▼';
+  const pi=document.getElementById('aPhoto');
   if(pi.src){URL.revokeObjectURL(pi.src);pi.src='';}
-  document.getElementById('photoPh').style.display='flex';
+  document.getElementById('phPh').style.display='flex';
   pi.style.display='none';
-  hidePreview(); hideMsg(); window.scrollTo({top:0,behavior:'smooth'});
+  document.getElementById('phBadge').style.display='none';
+  document.getElementById('phDecBtn').style.display='none';
+  hideProg(); hideMsg(); gRefId='';gMobileHash='';gEmailHash='';gPhotoBytes=null;
+  window.scrollTo({top:0,behavior:'smooth'});
 }
-function toggleRaw(){rawOpen=!rawOpen;document.getElementById('rawPre').classList.toggle('show',rawOpen);document.getElementById('rawArr').textContent=rawOpen?'▲':'▼';}
-function toggleDbg(){dbgOpen=!dbgOpen;document.getElementById('dbgPanel').classList.toggle('show',dbgOpen);document.getElementById('dbgArr').textContent=dbgOpen?'▲':'▼';}
 
-// ─── UI state ──────────────────────────────────────────────────────
-function setLoading(on){
-  document.getElementById('btnStart').classList.toggle('loading',on);
-  document.getElementById('spin').style.display=on?'block':'none';
-  document.getElementById('btnTxt').textContent=on?'Starting…':'📷 Start Camera Scanning';
-  document.getElementById('btnStart').disabled=on;
+function togDbg(){dbgOpen=!dbgOpen;document.getElementById('dbgP').classList.toggle('show',dbgOpen);document.getElementById('dbgArr').textContent=dbgOpen?'▲':'▼';}
+function togRaw(){rawOpen=!rawOpen;document.getElementById('rawP').classList.toggle('show',rawOpen);document.getElementById('rawArr').textContent=rawOpen?'▲':'▼';}
+
+function setBtnLd(on){
+  document.getElementById('camBtn').classList.toggle('ld',on);
+  document.getElementById('spi').style.display=on?'block':'none';
+  document.getElementById('camLbl').textContent=on?'Starting…':'📷 Start Camera Scanning';
+  document.getElementById('camBtn').disabled=on;
 }
 function setBtnState(s){
-  document.getElementById('btnStart').classList.remove('loading');
-  document.getElementById('spin').style.display='none';
-  document.getElementById('btnStart').disabled=(s==='scanning');
-  document.getElementById('btnTxt').textContent=s==='scanning'?'🔍 Scanning…':'📷 Start Camera Scanning';
+  document.getElementById('camBtn').classList.remove('ld');
+  document.getElementById('spi').style.display='none';
+  document.getElementById('camBtn').disabled=s==='scanning';
+  document.getElementById('camLbl').textContent=s==='scanning'?'🔍 Scanning…':'📷 Start Camera Scanning';
 }
-function showErr(m){_msg('msgErr','errTxt',m);}
-function showInf(m){_msg('msgInf','infTxt',m);}
-function showWarn(m){_msg('msgWarn','warnTxt',m);}
-function _msg(mid,tid,m){['msgErr','msgInf','msgWarn'].forEach(id=>document.getElementById(id).classList.remove('show'));document.getElementById(tid).textContent=m;document.getElementById(mid).classList.add('show');}
-function hideMsg(){['msgErr','msgInf','msgWarn'].forEach(id=>document.getElementById(id).classList.remove('show'));}
+function showProg(f){
+  const b=document.getElementById('progBox');
+  const pi=document.getElementById('prevImg');
+  const u=URL.createObjectURL(f);
+  pi.src=u; pi.onload=()=>URL.revokeObjectURL(u);
+  document.getElementById('pName').textContent=f.name;
+  document.getElementById('pDim').textContent=Math.round(f.size/1024)+'KB';
+  document.getElementById('pFill').style.width='0%';
+  document.getElementById('pLab').textContent='Preparing…';
+  document.getElementById('pChips').innerHTML='';
+  b.classList.add('show'); hideMsg();
+}
+function hideProg(){document.getElementById('progBox').classList.remove('show');}
+
+function showErr(m){_msg('mErr','eTxt',m);}
+function showInf(m){_msg('mInf','iTxt',m);}
+function showWarn(m){_msg('mWarn','wTxt',m);}
+function _msg(mid,tid,m){['mErr','mInf','mWarn'].forEach(id=>document.getElementById(id).classList.remove('show'));document.getElementById(tid).textContent=m;document.getElementById(mid).classList.add('show');}
+function hideMsg(){['mErr','mInf','mWarn'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 
 if(location.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(location.hostname))
-  showWarn('Camera requires HTTPS. The upload option works on any connection.');
+  showWarn('Camera requires HTTPS. The image upload works on any connection.');
 </script>
 </body>
 </html>
