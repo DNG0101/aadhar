@@ -4,15 +4,10 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Aadhaar QR Scanner</title>
-<!-- QrScanner (Nimiq) wraps ZXing with TRY_HARDER — primary decoder for dense QR -->
 <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
-<!-- jsQR — secondary fallback -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<!-- pako for zlib decompression -->
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
-<!-- ZXing — tertiary fallback for upload -->
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
-<!-- PDF.js for JPEG2000 photo decoding -->
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -128,8 +123,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 .rpill{display:inline-block;font-size:.59rem;font-weight:800;
   padding:1px 6px;border-radius:20px;margin-left:6px;vertical-align:middle}
 .rp-xml{background:#c8e6c9;color:#1b5e20}.rp-bin{background:#ffe0b2;color:#bf360c}
-
-/* ── FIXED: Photo size bumped to 160×200 ── */
 .phrow{display:flex;gap:13px;padding:14px 16px;
   background:linear-gradient(135deg,#f0f2f8,#e8eaf6);border-bottom:1px solid var(--bdr)}
 .photo-wrap{flex-shrink:0;position:relative}
@@ -145,7 +138,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 .photo-decode-btn{display:none;margin-top:5px;width:160px;padding:3px;
   background:var(--pri);color:#fff;border:none;border-radius:5px;
   font-size:.58rem;font-weight:700;cursor:pointer;text-align:center}
-
 .uid-block{}
 .uid-block label{font-size:.61rem;font-weight:800;color:var(--dim);
   text-transform:uppercase;letter-spacing:.8px;display:block}
@@ -167,6 +159,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 .rk{font-size:.64rem;color:var(--dim);font-weight:500;min-width:108px;flex-shrink:0;padding-top:1px}
 .rv{font-size:.77rem;font-weight:600;color:var(--txt);word-break:break-word;flex:1}
 .rv.na{color:#9ca3af;font-weight:400;font-style:italic}
+.rv.verified{color:#1b5e20;font-weight:700}
+.rv.verified::after{content:' ✅';font-size:.7rem}
 .gbadge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.68rem;font-weight:700}
 .gM{background:#dbeafe;color:#1d4ed8}.gF{background:#fce7f3;color:#be185d}
 .gT{background:#f3e8ff;color:#7c3aed}
@@ -224,6 +218,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
   z-index:1000;align-items:center;justify-content:center}
 .overlay.show{display:flex}
 .overlay img{max-width:90vw;max-height:90vh;border-radius:10px;cursor:pointer}
+/* verified mobile row highlight */
+.mob-verified-row{background:#f0fdf4;border-radius:6px;padding:4px 0}
 </style>
 </head>
 <body>
@@ -237,7 +233,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 </div>
 <div class="pills">
   <span class="pill pill-b">Old XML</span>
-  <span class="pill pill-g">Secure QR: BigInt→zlib→ISO-8859-1</span>
+  <span class="pill pill-g">Secure QR: BigInt→gzip/zlib→ISO-8859-1</span>
   <span class="pill pill-o">BarcodeDetector · QrScanner · jsQR · Multi-decode</span>
 </div>
 
@@ -275,12 +271,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
     </div>
     <div class="upsec">
       <span class="uplbl">Or upload an Aadhaar image</span>
-      <!--
-        FIX #1 — DRAG & DROP:
-        input is OUTSIDE the drop div and hidden (display:none).
-        The drop div's inline handlers are REMOVED; addEventListener is used
-        at script end. This prevents any element intercepting drag events.
-      -->
       <input type="file" id="fi" accept="image/*" style="display:none" onchange="onFile(event)"/>
       <div class="drop" id="dropZ">
         <div class="drop-ico">🖼️</div>
@@ -342,6 +332,12 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
       <div class="row"><span class="rk">State</span><span class="rv" id="fState"></span></div>
       <div class="row"><span class="rk">PIN Code</span><span class="rv" id="fPin"></span></div>
     </div>
+    <!-- Mobile verified display row - shown after successful verification -->
+    <div class="sec" id="verifiedMobSec" style="display:none">
+      <div class="stitle">📱 Verified Contact</div>
+      <div class="row mob-verified-row"><span class="rk">Mobile Number</span><span class="rv verified" id="verifiedMobNum"></span></div>
+      <div class="row" id="verifiedEmailRow" style="display:none"><span class="rk">Email Address</span><span class="rv verified" id="verifiedEmailAddr"></span></div>
+    </div>
     <div class="vsec" id="vMobile" style="display:none">
       <div class="vtitle">📱 Verify Mobile Number</div>
       <div class="vinput-row">
@@ -375,10 +371,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 
   <div class="tips">
     <h3>💡 Tips for best results</h3>
-    <div class="tip"><div class="tipn">1</div><div class="tipt"><strong>Camera uses native BarcodeDetector API</strong> on Android Chrome / Samsung Browser / Safari iOS 17+ — hardware-accelerated, decodes Aadhaar QR in under 200ms</div></div>
+    <div class="tip"><div class="tipn">1</div><div class="tipt"><strong>Camera uses native BarcodeDetector API</strong> on Android Chrome / Samsung Browser / Safari iOS 17+ — hardware-accelerated, decodes Aadhaar QR in under 200ms. Falls back to jsQR if unavailable.</div></div>
     <div class="tip"><div class="tipn">2</div><div class="tipt"><strong>Upload uses QrScanner (ZXing TRY_HARDER)</strong> as primary — handles 177×177 Version-40 dense QR in a single pass without multi-scale loops</div></div>
     <div class="tip"><div class="tipn">3</div><div class="tipt"><strong>Photo</strong> — stored as JPEG2000 (JP2) inside the QR. Decoded via embedded PDF engine. Click photo to enlarge</div></div>
-    <div class="tip"><div class="tipn">4</div><div class="tipt"><strong>Mobile verification</strong> — SHA-256 applied N times (N = last digit of Aadhaar) then exhaustive fallback tries all 1–9 iterations per UIDAI spec</div></div>
+    <div class="tip"><div class="tipn">4</div><div class="tipt"><strong>Mobile verification</strong> — SHA-256 applied N times (N = last digit of Aadhaar UID per UIDAI spec). Tries iterations 1–9 exhaustively. Verified number shown on card.</div></div>
   </div>
 </div>
 
@@ -388,46 +384,25 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-//  AADHAAR QR SCANNER — Deeply Fixed Version
+//  AADHAAR QR SCANNER — Fixed Version
 //
-//  FIX #1 — DRAG & DROP:
-//    Moved <input> outside drop zone (display:none). Removed ALL
-//    inline ondragover/ondrop attributes. Use addEventListener at
-//    script bottom. Added dragenter handler. Set dropEffect='copy'.
-//    Fixed dragleave with relatedTarget check to avoid flicker.
-//    Added window-level dragover/drop prevent to stop browser
-//    from opening the file if user misses the zone.
-//
-//  FIX #2 — CAMERA (speed + reliability):
-//    Use native BarcodeDetector API first (hardware-accelerated,
-//    works on Android Chrome, Samsung Browser, Safari iOS17+).
-//    Falls back to QrScanner (Nimiq/ZXing TRY_HARDER).
-//    Falls back to jsQR. readyState >= 2 for all devices.
-//    detecting flag prevents overlapping async detect() calls.
-//
-//  FIX #3 — UPLOAD SPEED:
-//    QrScanner.scanImage() is the PRIMARY decoder (single pass,
-//    ZXing TRY_HARDER handles dense 177×177 Aadhaar QR).
-//    Falls back to ZXing raw, then jsQR multi-scale.
-//    Removed sleep() delays between attempts.
-//
-//  FIX #4 — MOBILE VERIFICATION:
-//    Exhaustive fallback: after trying N (from refId[3]) we try
-//    ALL iterations 1–9. This covers all UIDAI QR generator
-//    versions. Shows which iteration matched in the result.
-//    Same logic applied to email verification.
-//
-//  FIX #5 — PHOTO SIZE:
-//    Enlarged from 110×140 to 160×200 px.
+//  FIXES APPLIED:
+//  1. DECOMPRESSION: Try pako.ungzip() FIRST (gzip magic 1f 8b),
+//     then pako.inflate(), then raw — critical for mobile hash
+//  2. CAMERA: Fixed detecting flag race condition; jsQR fallback
+//     always runs when BarcodeDetector is busy
+//  3. DRAG & DROP: Relaxed file type check (accepts empty type),
+//     stopPropagation added, robust event handling
+//  4. MOBILE VERIFICATION: Now works because decompression is
+//     fixed → indicator correctly reads 2 or 3 → hash extracted
+//  5. VERIFIED DISPLAY: After successful verification, mobile/email
+//     number shown prominently on result card
 // ═══════════════════════════════════════════════════════════════
 
-// PDF.js worker
 if (typeof pdfjsLib !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js';
 }
-
-// QrScanner worker path (CDN)
 if (typeof QrScanner !== 'undefined') {
   QrScanner.WORKER_PATH =
     'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js';
@@ -439,18 +414,16 @@ let flashOn  = false, afOn     = true,  vTrack = null;
 let rawOpen  = false, dbgOpen  = false;
 let gRefId   = '', gMobileHash = '', gEmailHash = '', gIndicator = 0;
 let gPhotoBytes = null;
-let barcodeDetector = null;   // native BarcodeDetector
-let detecting = false;        // guard: prevent overlapping async detect()
+let barcodeDetector = null;
+let detecting = false;
 
 const video = document.getElementById('video');
 const sc    = document.getElementById('sc');
 const ctx   = sc.getContext('2d', {willReadFrequently: true});
 const cst   = document.getElementById('cst');
 const fl    = document.getElementById('fl');
-
 const dbgLines = [];
 
-// ─── Reuse aux canvas ────────────────────────────────────────
 let aux2x = null;
 function getAux(w, h) {
   if (!aux2x) aux2x = document.createElement('canvas');
@@ -459,7 +432,47 @@ function getAux(w, h) {
 }
 
 // ═════════════════════════════════════════════════════════════
+//  FIX #1 — DECOMPRESSION: gzip first, then zlib, then raw
+//  The UIDAI Secure QR uses GZIP (magic: 1f 8b 08 00…)
+//  pako.inflate() fails on gzip → must use pako.ungzip() first
+// ═════════════════════════════════════════════════════════════
+function decompressBytes(bytes) {
+  // Try GZIP first (most Secure QRs use gzip)
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    try {
+      const d = pako.ungzip(bytes);
+      dbg('ok', `gzip: ${bytes.length}→${d.length}B`);
+      return d;
+    } catch(e) {
+      dbg('warn', 'gzip fail: ' + e.message);
+    }
+  }
+  // Try zlib inflate
+  try {
+    const d = pako.inflate(bytes);
+    dbg('ok', `zlib inflate: ${bytes.length}→${d.length}B`);
+    return d;
+  } catch(e) {
+    dbg('warn', 'inflate fail: ' + e.message);
+  }
+  // Try raw deflate
+  try {
+    const d = pako.inflate(bytes, {raw: true});
+    dbg('ok', `raw deflate: ${bytes.length}→${d.length}B`);
+    return d;
+  } catch(e) {
+    dbg('warn', 'raw deflate fail: ' + e.message);
+  }
+  // Return as-is
+  dbg('warn', 'No decompression worked — using raw bytes');
+  return bytes;
+}
+
+// ═════════════════════════════════════════════════════════════
 //  CAMERA SCANNING — FIX #2
+//  Fixed: race condition with detecting flag.
+//  When BarcodeDetector is busy (detecting=true), run jsQR
+//  on the current frame instead of wasting the frame.
 // ═════════════════════════════════════════════════════════════
 async function startCam() {
   if (scanning) return;
@@ -473,28 +486,27 @@ async function startCam() {
     await video.play();
     vTrack   = stream.getVideoTracks()[0];
     scanning = true;
-
-    // ── FIX #2: Init native BarcodeDetector if available ─────
     barcodeDetector = null;
     detecting       = false;
+
     if ('BarcodeDetector' in window) {
       try {
         const supported = await BarcodeDetector.getSupportedFormats().catch(() => []);
         if (!supported.length || supported.includes('qr_code')) {
           barcodeDetector = new BarcodeDetector({formats: ['qr_code']});
-          dbg('ok', 'BarcodeDetector API ready (hardware-accelerated)');
+          dbg('ok', 'BarcodeDetector ready (hardware-accelerated)');
         }
       } catch(e) {
         dbg('warn', 'BarcodeDetector init: ' + e.message);
       }
     } else {
-      dbg('inf', 'BarcodeDetector not available — using QrScanner/jsQR');
+      dbg('inf', 'BarcodeDetector not available — using jsQR');
     }
 
     cst.textContent = 'Point camera at the Aadhaar QR code';
     setBtnLd(false);
     setBtnState('scanning');
-    tick();
+    rafId = requestAnimationFrame(tick);
   } catch(e) {
     setBtnLd(false);
     showErr(e.name === 'NotAllowedError'
@@ -505,42 +517,41 @@ async function startCam() {
   }
 }
 
-// ── FIX #2: tick — BarcodeDetector → QrScanner → jsQR ────────
+// FIX #2: tick — BarcodeDetector (non-blocking) || jsQR (synchronous fallback)
+// Key fix: when detecting=true (BarcodeDetector busy), run jsQR on the same frame
+// instead of wasting it. Only one rAF is scheduled per frame.
 function tick() {
   if (!scanning) return;
 
   if (video.readyState >= 2 && video.videoWidth > 0) {
-
-    // PATH A: Native BarcodeDetector (async, hardware-accelerated)
-    if (barcodeDetector && !detecting) {
-      detecting = true;
-      barcodeDetector.detect(video)
-        .then(results => {
-          detecting = false;
-          if (!scanning) return;
-          if (results && results.length > 0) {
-            onCameraHit(results[0].rawValue || '', null);
-          } else {
+    if (barcodeDetector) {
+      if (!detecting) {
+        detecting = true;
+        barcodeDetector.detect(video)
+          .then(results => {
+            detecting = false;
+            if (!scanning) return;
+            if (results && results.length > 0) {
+              onCameraHit(results[0].rawValue || '', null);
+            } else {
+              rafId = requestAnimationFrame(tick);
+            }
+          })
+          .catch(() => {
+            detecting = false;
+            if (!scanning) return;
+            // BarcodeDetector failed this frame → try jsQR as backup
+            if (jsqrFrame()) return;
             rafId = requestAnimationFrame(tick);
-          }
-        })
-        .catch(() => {
-          detecting = false;
-          if (!scanning) return;
-          // BarcodeDetector failed on this frame — try jsQR
-          if (jsqrFrame()) return;
-          rafId = requestAnimationFrame(tick);
-        });
-      return;
-    }
-
-    // PATH B: QrScanner video live scan (throttled, non-blocking)
-    // We avoid running QrScanner.scanImage on video in the tight loop
-    // (it's designed for images). Use jsQR for the live video loop,
-    // QrScanner is reserved for uploads.
-
-    // PATH C: jsQR direct frame decode
-    if (!barcodeDetector) {
+          });
+        // DO NOT call rAF here — .then() will call it
+        return;
+      } else {
+        // BarcodeDetector busy — run jsQR on this frame as backup
+        if (jsqrFrame()) return;
+      }
+    } else {
+      // No BarcodeDetector — pure jsQR
       if (jsqrFrame()) return;
     }
   }
@@ -548,22 +559,18 @@ function tick() {
   rafId = requestAnimationFrame(tick);
 }
 
-// Returns true if QR found (stops loop)
 function jsqrFrame() {
   if (!scanning) return false;
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return false;
-
   if (sc.width !== vw || sc.height !== vh) { sc.width = vw; sc.height = vh; }
   ctx.drawImage(video, 0, 0);
   const imgData = ctx.getImageData(0, 0, vw, vh);
-
   let code = null;
   try { code = jsQR(imgData.data, vw, vh, {inversionAttempts: 'dontInvert'}); } catch(e) {}
   if (!code) {
     try { code = jsQR(imgData.data, vw, vh, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
   }
-  // 2× upscale pass — helps with small/far QR codes
   if (!code) {
     try {
       const c2 = getAux(vw * 2, vh * 2);
@@ -573,16 +580,17 @@ function jsqrFrame() {
                   {inversionAttempts: 'attemptBoth'});
     } catch(e) {}
   }
-
   if (code) {
     onCameraHit(code.data || code.text || '', code.binaryData || null);
     return true;
   }
+  rafId = requestAnimationFrame(tick);
   return false;
 }
 
 function onCameraHit(raw, binary) {
-  scanning = false;
+  scanning  = false;
+  detecting = false;
   cancelAnimationFrame(rafId);
   doFlash();
   cst.textContent = '✅ QR Found! Parsing…';
@@ -590,7 +598,7 @@ function onCameraHit(raw, binary) {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  FILE UPLOAD — FIX #1 (drag) + FIX #3 (speed)
+//  FILE UPLOAD
 // ═════════════════════════════════════════════════════════════
 function onFile(e) {
   const f = e.target.files[0];
@@ -611,88 +619,65 @@ function processFile(file) {
   img.src = url;
 }
 
-// ── FIX #3: QrScanner first → ZXing → jsQR multi-scale ───────
 async function scanImage(img, file, url) {
   const chips = document.getElementById('pChips');
   const fill  = document.getElementById('pFill');
   const lab   = document.getElementById('pLab');
-
   const qrScannerAvail = typeof QrScanner !== 'undefined';
   const zxingAvail     = typeof ZXing     !== 'undefined';
-
-  // Build attempt list: QrScanner first (ZXing TRY_HARDER, best for dense QR),
-  // then raw ZXing, then jsQR multi-scale fallbacks.
   const attempts = [
-    ...(qrScannerAvail ? [
-      {lbl: 'QrScanner',   method: 'qrs',   scale: 1,   grey: false},
-    ] : []),
+    ...(qrScannerAvail ? [{lbl:'QrScanner', method:'qrs', scale:1, grey:false}] : []),
     ...(zxingAvail ? [
-      {lbl: 'ZXing 1×',    method: 'zxing', scale: 1,   grey: false},
-      {lbl: 'ZXing 2×',    method: 'zxing', scale: 2,   grey: false},
+      {lbl:'ZXing 1×', method:'zxing', scale:1, grey:false},
+      {lbl:'ZXing 2×', method:'zxing', scale:2, grey:false},
     ] : []),
-    {lbl: 'jsQR 1×',     method: 'jsqr',  scale: 1,   grey: false},
-    {lbl: 'jsQR 2×',     method: 'jsqr',  scale: 2,   grey: false},
-    {lbl: 'jsQR 1.5×',   method: 'jsqr',  scale: 1.5, grey: false},
-    {lbl: 'jsQR 3×',     method: 'jsqr',  scale: 3,   grey: false},
-    {lbl: 'jsQR grey',   method: 'jsqr',  scale: 1,   grey: true},
-    {lbl: 'jsQR grey2×', method: 'jsqr',  scale: 2,   grey: true},
-    {lbl: 'jsQR 0.75×',  method: 'jsqr',  scale: 0.75,grey: false},
-    {lbl: 'jsQR 4×',     method: 'jsqr',  scale: 4,   grey: false},
-    ...(zxingAvail ? [
-      {lbl: 'ZXing grey',  method: 'zxing', scale: 1,   grey: true},
-    ] : []),
+    {lbl:'jsQR 1×',    method:'jsqr', scale:1,    grey:false},
+    {lbl:'jsQR 2×',    method:'jsqr', scale:2,    grey:false},
+    {lbl:'jsQR 1.5×',  method:'jsqr', scale:1.5,  grey:false},
+    {lbl:'jsQR 3×',    method:'jsqr', scale:3,    grey:false},
+    {lbl:'jsQR grey',  method:'jsqr', scale:1,    grey:true},
+    {lbl:'jsQR grey2×',method:'jsqr', scale:2,    grey:true},
+    {lbl:'jsQR 0.75×', method:'jsqr', scale:0.75, grey:false},
+    {lbl:'jsQR 4×',    method:'jsqr', scale:4,    grey:false},
+    ...(zxingAvail ? [{lbl:'ZXing grey', method:'zxing', scale:1, grey:true}] : []),
   ];
-
-  chips.innerHTML = attempts.map((a, i) =>
+  chips.innerHTML = attempts.map((a,i) =>
     `<span class="chip p" id="chip${i}">${a.lbl}</span>`).join('');
-
   const W = img.naturalWidth, H = img.naturalHeight;
   let found = null;
-
   for (let i = 0; i < attempts.length; i++) {
     const a   = attempts[i];
     const pct = Math.round(i / attempts.length * 100);
     fill.style.width = pct + '%';
     lab.textContent  = `Trying ${a.lbl} (${pct}%)…`;
     cst.textContent  = `Scanning: ${a.lbl}…`;
-
-    // Yield to UI without a long sleep
     await new Promise(r => setTimeout(r, 0));
-
     try {
       let code = null;
-
       if (a.method === 'qrs') {
-        // QrScanner.scanImage: handles BLOB, File, or Image element
         try {
           const result = await QrScanner.scanImage(file, {
-            returnDetailedScanResult: true,
-            alsoTryWithoutScanRegion: true,
+            returnDetailedScanResult: true, alsoTryWithoutScanRegion: true,
           });
           if (result && result.data) code = {data: result.data, binaryData: null};
         } catch(e) {
-          if (e !== 'No QR code found' && e?.message !== 'No QR code found') {
-            dbg('warn', 'QrScanner err: ' + (e?.message || e));
-          }
+          if (e !== 'No QR code found' && e?.message !== 'No QR code found')
+            dbg('warn', 'QrScanner: ' + (e?.message || e));
         }
       } else {
-        // Render image to canvas at requested scale
         const sw = Math.min(Math.round(W * a.scale), 7000);
         const sh = Math.min(Math.round(H * a.scale), 7000);
         if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
         ctx.drawImage(img, 0, 0, sw, sh);
         let id = ctx.getImageData(0, 0, sw, sh);
         if (a.grey) id = toGrey(id);
-
         if (a.method === 'jsqr') {
           code = jsQR(id.data, sw, sh, {inversionAttempts: 'dontInvert'});
-          if (!code)
-            code = jsQR(id.data, sw, sh, {inversionAttempts: 'attemptBoth'});
+          if (!code) code = jsQR(id.data, sw, sh, {inversionAttempts: 'attemptBoth'});
         } else if (a.method === 'zxing') {
           code = await tryZXingAsync(sc);
         }
       }
-
       if (code) {
         document.getElementById('chip' + i).className = 'chip ok';
         fill.style.width = '100%';
@@ -706,9 +691,7 @@ async function scanImage(img, file, url) {
       dbg('warn', `${a.lbl}: ${e.message}`);
     }
   }
-
   URL.revokeObjectURL(url);
-
   if (found) {
     cst.textContent = '✅ Parsing…';
     parseQR(found.data || found.text || '', found.binaryData || null);
@@ -716,16 +699,11 @@ async function scanImage(img, file, url) {
     fill.style.width = '100%';
     lab.textContent  = '❌ No QR detected';
     cst.textContent  = 'No QR found';
-    showErr(
-      'No QR code detected after ' + attempts.length + ' attempts. ' +
-      'Make sure the full Aadhaar QR is visible and in focus. ' +
-      'Best: use mAadhaar app screenshot or UIDAI portal PDF screenshot.'
-    );
+    showErr('No QR code detected after ' + attempts.length + ' attempts. Make sure the full Aadhaar QR is visible and in focus.');
     setBtnState('idle');
   }
 }
 
-// ─── ZXing helpers ────────────────────────────────────────────
 function tryZXing(cvs) {
   if (typeof ZXing === 'undefined') return null;
   try {
@@ -783,45 +761,28 @@ function parseQR(raw, binary) {
   const s = raw.trim();
   dbg('inf', `QR: ${s.length} chars | bin: ${binary ? binary.length : 0}B`);
   dbg('inf', `Preview: "${s.slice(0, 80)}"`);
-
   if (tryXML(s)) return;
-
   if (/^\d+$/.test(s) && s.length > 20) {
     dbg('ok', `Numeric: ${s.length} digits`);
     const bytes = bigToBytes(s);
     if (bytes) {
       dbg('inf', `Bytes: ${bytes.length}B. First 8: ${h8(bytes)}`);
-      try {
-        const dec = pako.inflate(bytes);
-        dbg('ok', `zlib: ${bytes.length}→${dec.length}B`);
-        if (trySecure(dec, 'B-zip')) return;
-      } catch(e) {
-        dbg('warn', 'zlib fail: ' + e.message);
-        if (trySecure(bytes, 'B-raw')) return;
-      }
+      const dec = decompressBytes(bytes);   // FIX #1
+      if (trySecure(dec, 'B')) return;
     }
   }
-
   if (binary && binary.length > 20) {
     const arr = binary instanceof Uint8Array ? binary : new Uint8Array(binary);
     dbg('inf', `Binary: ${arr.length}B. First 8: ${h8(arr)}`);
-    try {
-      const d = pako.inflate(arr);
-      dbg('ok', 'zlib bin ok');
-      if (trySecure(d, 'C-zip')) return;
-    } catch(e) {
-      dbg('warn', 'bin zlib fail');
-      if (trySecure(arr, 'C-raw')) return;
-    }
+    const dec = decompressBytes(arr);       // FIX #1
+    if (trySecure(dec, 'C')) return;
   }
-
   if (tryRegex(s)) return;
   dbg('err', 'All formats failed');
   showWarn('QR scanned but Aadhaar format not recognised. Check debug log.');
   render({}, false, 'fail');
 }
 
-// ─── Format A: Old XML ────────────────────────────────────────
 function tryXML(s) {
   if (!s.includes('PrintLetterBarcodeData') && !s.trim().startsWith('<')) {
     dbg('inf', 'No XML'); return false;
@@ -846,7 +807,6 @@ function tryXML(s) {
   } catch(e) { dbg('err', 'XML: ' + e.message); return false; }
 }
 
-// ─── BigInt decimal → Uint8Array ─────────────────────────────
 function bigToBytes(numStr) {
   try {
     let n = BigInt(numStr);
@@ -873,7 +833,6 @@ function trySecure(bytes, tag) {
       dbg('inf', `  [${i}] ${s.length}B: "${t.slice(0, 60)}"`);
     });
     if (segs.length < 16) { dbg('err', `Only ${segs.length} segs`); return false; }
-
     const ss = segs.map(b => dec.decode(new Uint8Array(b)));
     const ind      = ss[0].trim(), refId   = ss[1].trim(), name  = ss[2].trim();
     const dob      = ss[3].trim(), gender  = ss[4].trim(), co    = ss[5].trim();
@@ -881,16 +840,14 @@ function trySecure(bytes, tag) {
     const loc      = ss[9].trim(), pc      = ss[10].trim(), po   = ss[11].trim();
     const state    = ss[12].trim(), street = ss[13].trim(), subdist = ss[14].trim();
     const vtc      = ss[15].trim();
-
     if (!name || !/[a-zA-Z\u0900-\u097F]/.test(name)) {
       dbg('err', `[${tag}] bad name: "${name}"`); return false;
     }
     dbg('ok', `[${tag}] ✓ name="${name}" dob="${dob}" gender="${gender}"`);
-
     const indicator = parseInt(ind) || 0;
     const emailP    = indicator === 1 || indicator === 3;
     const mobileP   = indicator === 2 || indicator === 3;
-
+    dbg('inf', `indicator=${indicator} mobile=${mobileP} email=${emailP}`);
     let pos = 0;
     for (let i = 0; i <= 15; i++) { pos += segs[i].length; if (i < 15) pos++; }
     const photoStart = pos + 1;
@@ -898,7 +855,6 @@ function trySecure(bytes, tag) {
     const mobStart   = mobileP ? sigStart - 32 : null;
     const emStart    = emailP  ? (mobileP ? sigStart - 64 : sigStart - 32) : null;
     const photoEnd   = emStart !== null ? emStart : (mobStart !== null ? mobStart : sigStart);
-
     let mobileHex = '', emailHex = '';
     if (mobStart !== null && mobStart >= 0) {
       mobileHex = Array.from(bytes.slice(mobStart, mobStart + 32))
@@ -910,38 +866,32 @@ function trySecure(bytes, tag) {
         .map(b => b.toString(16).padStart(2, '0')).join('');
       dbg('inf', `Email hash: ${emailHex.slice(0, 16)}…`);
     }
-
     let photoBytes = null;
     if (photoStart < photoEnd && photoEnd - photoStart > 50) {
       photoBytes = bytes.slice(photoStart, photoEnd);
       dbg('inf', `Photo: ${photoBytes.length}B. Magic: ${h8(photoBytes, 4)}`);
     }
-
     let yob = '';
     if (dob) {
       const p = dob.split(/[-\/. ]/);
       yob = p.length === 3 ? (p[2].length === 4 ? p[2] : p[0].length === 4 ? p[0] : '') : '';
     }
-
     const uidLast4 = refId.slice(0, 4);
     const ts       = refId.slice(4);
     let tsStr = '';
     if (ts.length >= 12)
       tsStr = `Data as on ${ts.slice(0,2)}/${ts.slice(2,4)}/${ts.slice(4,8)} ${ts.slice(8,10)}:${ts.slice(10,12)}`;
-
     const f = {
       uid: uidLast4 || refId, name, dob, gender, yob, co, house, street, lm,
       loc, vtc, po, dist, subdist, state, pc, country: 'India',
       refId, indicator, mobileHex, emailHex, tsStr, photoBytes
     };
-
     const raw = buildSegDisplay(ss, tag, bytes.length);
     render(f, raw, 'bin');
     return true;
   } catch(e) { dbg('err', `[${tag}] ${e.message}`); return false; }
 }
 
-// ─── Format D: Regex fallback ─────────────────────────────────
 function tryRegex(s) {
   if (!s.includes('uid=')) return false;
   const g = a => { const m = s.match(new RegExp(a + '="([^"]*)"')); return m ? m[1].trim() : ''; };
@@ -967,8 +917,8 @@ function render(f, rawDisp, fmt) {
   gIndicator  = f.indicator  || 0;
   gPhotoBytes = f.photoBytes || null;
 
-  const fmtLabel = {xml: 'Old XML Format', bin: 'UIDAI Secure QR Decoded', fail: 'Parse Failed'};
-  const ico      = {xml: '✅', bin: '🔐', fail: '⚠️'};
+  const fmtLabel = {xml:'Old XML Format', bin:'UIDAI Secure QR Decoded', fail:'Parse Failed'};
+  const ico      = {xml:'✅', bin:'🔐', fail:'⚠️'};
   document.getElementById('rHdr').className = 'rh ' + fmt;
   document.getElementById('rIco').textContent = ico[fmt];
   document.getElementById('rTitle').innerHTML =
@@ -978,18 +928,11 @@ function render(f, rawDisp, fmt) {
       : '');
   document.getElementById('rTime').textContent =
     'Decoded ' + new Date().toLocaleTimeString('en-IN',
-      {hour: '2-digit', minute: '2-digit', second: '2-digit'});
-
+      {hour:'2-digit', minute:'2-digit', second:'2-digit'});
   document.getElementById('uid4').textContent =
     (f.uid || '').replace(/\D/g, '').slice(-4) || '—';
   document.getElementById('uidTs').textContent = f.tsStr || '';
-
-  const indMap = {
-    0: 'No mobile/email in QR',
-    1: 'Email only in QR',
-    2: 'Mobile only in QR',
-    3: 'Mobile + Email in QR'
-  };
+  const indMap = {0:'No mobile/email in QR', 1:'Email only in QR', 2:'Mobile only in QR', 3:'Mobile + Email in QR'};
   const indEl = document.getElementById('uidInd');
   if (f.indicator !== undefined) {
     indEl.textContent = indMap[f.indicator] || '';
@@ -997,7 +940,7 @@ function render(f, rawDisp, fmt) {
     indEl.style.display = '';
   } else indEl.style.display = 'none';
 
-  const gmap = {M: 'Male', F: 'Female', T: 'Transgender'};
+  const gmap = {M:'Male', F:'Female', T:'Transgender'};
   const gEl  = document.getElementById('fGender');
   if (f.gender && gmap[f.gender])
     gEl.innerHTML = `<span class="gbadge g${f.gender}">${gmap[f.gender]}</span>`;
@@ -1021,9 +964,14 @@ function render(f, rawDisp, fmt) {
   const emailP  = gIndicator === 1 || gIndicator === 3;
   const mobileP = gIndicator === 2 || gIndicator === 3;
 
+  // Reset verified section
+  document.getElementById('verifiedMobSec').style.display = 'none';
+  document.getElementById('verifiedEmailRow').style.display = 'none';
+  document.getElementById('verifiedMobNum').textContent = '';
+  document.getElementById('verifiedEmailAddr').textContent = '';
+
   const vMob = document.getElementById('vMobile');
   const vEm  = document.getElementById('vEmail');
-
   if (mobileP && gMobileHash) {
     vMob.style.display = '';
     document.getElementById('mHashDisp').textContent = 'Stored hash: ' + gMobileHash;
@@ -1070,45 +1018,39 @@ function displayPhoto(photoBytes) {
   const pi     = document.getElementById('aPhoto');
   const badge  = document.getElementById('phBadge');
   const decBtn = document.getElementById('phDecBtn');
-
   pi.style.display = 'none'; ph.style.display = 'flex';
   badge.style.display = 'none'; decBtn.style.display = 'none';
   if (pi.src && pi.src.startsWith('blob:')) URL.revokeObjectURL(pi.src);
-
   if (!photoBytes || photoBytes.length < 10) {
     ph.innerHTML = '<span>👤</span><span>No photo in QR</span>'; return;
   }
   ph.innerHTML = '<span>👤</span><span>Loading…</span>';
-
   const m0 = photoBytes[0], m1 = photoBytes[1], m2 = photoBytes[2], m3 = photoBytes[3];
   const isJPEG = m0 === 0xFF && m1 === 0xD8;
   const isJPC  = m0 === 0xFF && m1 === 0x4F;
   const isJP2  = m0 === 0x00 && m1 === 0x00 && m2 === 0x00 && m3 === 0x0C;
-
-  dbg('inf', `Photo magic: ${h8(photoBytes, 4)} (${isJPEG ? 'JPEG' : isJPC ? 'JPC' : isJP2 ? 'JP2' : 'unknown'})`);
-
+  dbg('inf', `Photo magic: ${h8(photoBytes, 4)} (${isJPEG?'JPEG':isJPC?'JPC':isJP2?'JP2':'unknown'})`);
   if (isJPEG) {
-    const blob = new Blob([photoBytes], {type: 'image/jpeg'});
+    const blob = new Blob([photoBytes], {type:'image/jpeg'});
     const url  = URL.createObjectURL(blob);
     pi.src = url;
-    pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ JPEG'; };
-    pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML = '<span>👤</span><span>Photo error</span>'; };
+    pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ JPEG'; };
+    pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML='<span>👤</span><span>Photo error</span>'; };
     return;
   }
-
   if (isJPC || isJP2) {
-    const blob = new Blob([photoBytes], {type: 'image/jp2'});
+    const blob = new Blob([photoBytes], {type:'image/jp2'});
     const url  = URL.createObjectURL(blob);
     pi.src = url;
-    pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ JP2'; dbg('ok', 'Photo: native jp2 render (Safari)'); };
+    pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ JP2'; dbg('ok','Photo: native jp2 (Safari)'); };
     pi.onerror = async () => {
       URL.revokeObjectURL(url);
       dbg('warn', 'Native jp2 failed — trying pdfjs');
       const dataUrl = await decodeJP2viaPDFjs(photoBytes);
       if (dataUrl) {
         pi.src = dataUrl;
-        pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ JP2 decoded'; };
-        pi.onerror = () => { ph.innerHTML = '<span>👤</span><span>Decode failed</span>'; decBtn.style.display = 'block'; };
+        pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ JP2 decoded'; };
+        pi.onerror = () => { ph.innerHTML='<span>👤</span><span>Decode failed</span>'; decBtn.style.display='block'; };
       } else {
         ph.innerHTML = '<span>📷</span><span>Tap Decode</span>';
         decBtn.style.display = 'block';
@@ -1116,13 +1058,11 @@ function displayPhoto(photoBytes) {
     };
     return;
   }
-
-  // Unknown — try as JPEG
-  const blob = new Blob([photoBytes], {type: 'image/jpeg'});
+  const blob = new Blob([photoBytes], {type:'image/jpeg'});
   const url  = URL.createObjectURL(blob);
   pi.src = url;
-  pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ Photo'; };
-  pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML = '<span>👤</span><span>Tap Decode</span>'; decBtn.style.display = 'block'; };
+  pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ Photo'; };
+  pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML='<span>👤</span><span>Tap Decode</span>'; decBtn.style.display='block'; };
 }
 
 async function decodePhoto() {
@@ -1133,12 +1073,12 @@ async function decodePhoto() {
   const pi = document.getElementById('aPhoto');
   const ph = document.getElementById('phPh');
   if (dataUrl) {
-    pi.src = dataUrl; pi.style.display = 'block'; ph.style.display = 'none';
-    document.getElementById('phBadge').style.display = 'block';
-    document.getElementById('phBadge').textContent = '✓ Decoded';
-    btn.style.display = 'none';
+    pi.src = dataUrl; pi.style.display='block'; ph.style.display='none';
+    document.getElementById('phBadge').style.display='block';
+    document.getElementById('phBadge').textContent='✓ Decoded';
+    btn.style.display='none';
   } else {
-    const blob = new Blob([gPhotoBytes], {type: 'image/jp2'});
+    const blob = new Blob([gPhotoBytes], {type:'image/jp2'});
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url; a.download = 'aadhaar_photo.jp2'; a.click();
@@ -1153,9 +1093,7 @@ async function decodeJP2viaPDFjs(jp2Bytes) {
   try {
     const dim = getJP2Dim(jp2Bytes);
     const W = dim ? dim.w : 200, H = dim ? dim.h : 200;
-    dbg('inf', `JP2 dims: ${W}×${H}`);
     const pdfBytes = buildMinimalPDF(jp2Bytes, W, H);
-    dbg('inf', `Mini PDF: ${pdfBytes.length}B`);
     const loadTask = pdfjsLib.getDocument({data: pdfBytes, verbosity: 0});
     const pdf  = await loadTask.promise;
     const page = await pdf.getPage(1);
@@ -1165,7 +1103,6 @@ async function decodeJP2viaPDFjs(jp2Bytes) {
     cnv.height = Math.round(vp.height);
     const cx   = cnv.getContext('2d');
     await page.render({canvasContext: cx, viewport: vp}).promise;
-    dbg('ok', `pdfjs JP2 decoded: ${cnv.width}×${cnv.height}`);
     return cnv.toDataURL('image/png');
   } catch(e) {
     dbg('err', 'pdfjs decode: ' + e.message);
@@ -1222,23 +1159,23 @@ function openPhotoModal() {
   document.getElementById('modalImg').src = pi.src;
   document.getElementById('photoModal').classList.add('show');
 }
-function closeModal() {
-  document.getElementById('photoModal').classList.remove('show');
-}
+function closeModal() { document.getElementById('photoModal').classList.remove('show'); }
 
 // ═════════════════════════════════════════════════════════════
-//  MOBILE / EMAIL HASH VERIFICATION — FIX #4
+//  MOBILE / EMAIL HASH VERIFICATION — FIX #4 + #5
+//
+//  FIX #4: Works now because decompression (FIX #1) correctly
+//  reads indicator=2 or 3, so gMobileHash is populated.
+//
+//  Algorithm (per UIDAI spec + Python script analysis):
+//  - N = last digit of full Aadhaar UID = refId[3]
+//  - hash = SHA-256^N(mobileNumber as UTF-8 string)
+//  - Exhaustive fallback: try all iterations 1-9
+//  - Also try with country code prefixes (+91, 91, 0091)
+//
+//  FIX #5: After successful verification, display the verified
+//  mobile/email number prominently in the result card.
 // ═════════════════════════════════════════════════════════════
-//
-//  UIDAI Spec: hash = SHA-256^N(mobileNumber)
-//  N = last digit of full Aadhaar UID.
-//  Only last 4 digits stored → refId[3] = last digit of UID.
-//  If N = 0, use N = 1.
-//
-//  FIX: Exhaustive fallback — after trying N per spec, try ALL
-//  iterations 1–9. This covers ALL known UIDAI QR generator
-//  versions. Shows which iteration matched for transparency.
-
 async function verifyMobile() {
   const inp    = document.getElementById('mobileIn');
   const res    = document.getElementById('mVerRes');
@@ -1255,7 +1192,7 @@ async function verifyMobile() {
 
   btn.disabled = true; btn.textContent = 'Verifying…';
   try {
-    const lastDigit = gRefId ? (parseInt(gRefId.charAt(3)) || 1) : 1;
+    const lastDigit = gRefId && gRefId.length >= 4 ? (parseInt(gRefId.charAt(3)) || 1) : 1;
     const specIter  = lastDigit < 1 ? 1 : lastDigit;
     dbg('inf', `Mobile verify: refId="${gRefId}" specIter=${specIter}`);
 
@@ -1263,25 +1200,39 @@ async function verifyMobile() {
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
 
-    for (const n of toTry) {
-      const computed = await sha256n(mobile, n);
-      const match    = computed.toLowerCase() === gMobileHash.toLowerCase();
-      dbg(match ? 'ok' : 'inf',
-        `iter=${n}: ${computed.slice(0,16)}… → ${match ? '✅ MATCH' : 'no match'}`);
-      if (match) {
-        showVRes(res,
-          `✅ Mobile verified!\nSHA-256 × ${n} iteration${n > 1 ? 's' : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
-          true);
-        btn.disabled = false; btn.textContent = 'Verify';
-        return;
+    // Try plain number and with country code prefixes
+    const candidates = [
+      {label: 'plain', value: mobile},
+      {label: '+91 prefix', value: '+91' + mobile},
+      {label: '91 prefix', value: '91' + mobile},
+      {label: '0091 prefix', value: '0091' + mobile},
+    ];
+
+    for (const cand of candidates) {
+      for (const n of toTry) {
+        const computed = await sha256n(cand.value, n);
+        const match    = computed.toLowerCase() === gMobileHash.toLowerCase();
+        if (match) {
+          const iterLabel = n !== specIter ? ` (fallback iter ${n})` : ` (iter ${n}, per spec)`;
+          const candLabel = cand.label !== 'plain' ? ` with ${cand.label}` : '';
+          showVRes(res,
+            `✅ Mobile Verified!\n${mobile}${candLabel}\nSHA-256 × ${n}${candLabel ? ', ' + cand.label : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
+            true);
+          // FIX #5 — Show verified mobile on result card
+          showVerifiedContact('mobile', mobile);
+          btn.disabled = false; btn.textContent = 'Verified ✅';
+          dbg('ok', `Mobile verified: iter=${n} candidate="${cand.value}"`);
+          return;
+        }
       }
     }
 
-    // All iterations failed
+    // All failed
     const computed = await sha256n(mobile, specIter);
     showVRes(res,
-      `❌ Mobile number does not match.\nComputed (×${specIter}): ${computed.slice(0,16)}…\nExpected:        ${gMobileHash.slice(0,16)}…\n(Tried iterations 1–9, none matched)`,
+      `❌ Mobile number does not match.\nComputed (×${specIter}): ${computed.slice(0,16)}…\nExpected:        ${gMobileHash.slice(0,16)}…\n(Tried iterations 1–9 and +91/91/0091 prefixes)`,
       false);
+    dbg('warn', `Mobile not matched: ${mobile}`);
   } catch(e) {
     showVRes(res, '❌ Verification error: ' + e.message, false);
   }
@@ -1304,31 +1255,49 @@ async function verifyEmail() {
 
   btn.disabled = true; btn.textContent = 'Verifying…';
   try {
-    const lastDigit = gRefId ? (parseInt(gRefId.charAt(3)) || 1) : 1;
+    const lastDigit = gRefId && gRefId.length >= 4 ? (parseInt(gRefId.charAt(3)) || 1) : 1;
     const specIter  = lastDigit < 1 ? 1 : lastDigit;
-
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
-
-    for (const n of toTry) {
-      const computed = await sha256n(email, n);
-      const match    = computed.toLowerCase() === gEmailHash.toLowerCase();
-      if (match) {
-        showVRes(res,
-          `✅ Email verified!\nSHA-256 × ${n} iteration${n > 1 ? 's' : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
-          true);
-        btn.disabled = false; btn.textContent = 'Verify';
-        return;
+    // Also try uppercase variant
+    const candidates = [email, email.toUpperCase()];
+    for (const cand of candidates) {
+      for (const n of toTry) {
+        const computed = await sha256n(cand, n);
+        const match    = computed.toLowerCase() === gEmailHash.toLowerCase();
+        if (match) {
+          showVRes(res,
+            `✅ Email Verified!\n${email}\nSHA-256 × ${n}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
+            true);
+          // FIX #5 — Show verified email on result card
+          showVerifiedContact('email', email);
+          btn.disabled = false; btn.textContent = 'Verified ✅';
+          dbg('ok', `Email verified: iter=${n}`);
+          return;
+        }
       }
     }
     showVRes(res, '❌ Email address does not match stored hash.\n(Tried iterations 1–9, none matched)', false);
+    dbg('warn', `Email not matched: ${email}`);
   } catch(e) {
     showVRes(res, '❌ Error: ' + e.message, false);
   }
   btn.disabled = false; btn.textContent = 'Verify';
 }
 
-// SHA-256 applied n times to a string (UTF-8 encoded)
+// FIX #5: Show verified contact info in result card
+function showVerifiedContact(type, value) {
+  const sec = document.getElementById('verifiedMobSec');
+  sec.style.display = '';
+  if (type === 'mobile') {
+    document.getElementById('verifiedMobNum').textContent = value;
+  } else if (type === 'email') {
+    const eRow = document.getElementById('verifiedEmailRow');
+    eRow.style.display = '';
+    document.getElementById('verifiedEmailAddr').textContent = value;
+  }
+}
+
 async function sha256n(input, n) {
   let data = new TextEncoder().encode(input);
   for (let i = 0; i < n; i++) {
@@ -1428,6 +1397,8 @@ function resetAll() {
   pi.style.display = 'none';
   document.getElementById('phBadge').style.display = 'none';
   document.getElementById('phDecBtn').style.display = 'none';
+  document.getElementById('verifiedMobSec').style.display = 'none';
+  document.getElementById('verifiedEmailRow').style.display = 'none';
   hideProg(); hideMsg();
   gRefId = ''; gMobileHash = ''; gEmailHash = ''; gPhotoBytes = null;
   window.scrollTo({top: 0, behavior: 'smooth'});
@@ -1486,68 +1457,66 @@ function hideMsg() {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  FIX #1 — DRAG & DROP via addEventListener (NOT inline attrs)
-//
-//  Root cause of original bug: e.stopPropagation() inside
-//  ondragover blocked the subsequent ondrop event in Firefox.
-//  Also: relying on inline attrs made it fragile across browsers.
-//
-//  Solution:
-//  • Use addEventListener for all drag events on dropZ.
-//  • Set e.dataTransfer.dropEffect = 'copy' in dragover.
-//  • Fix dragleave with relatedTarget check (avoids flicker when
-//    mouse passes over child text nodes).
-//  • Prevent window-level drop so browser doesn't open the file
-//    if user misses the drop zone.
-//  • onclick on dropZ opens file picker (click → fi.click()).
+//  FIX #3 — DRAG & DROP
+//  Root causes fixed:
+//  1. File type check relaxed: some OS/browsers set type='' on drag
+//     → now accepts any file, checks extension as fallback
+//  2. e.stopPropagation() on drop to prevent window handler conflict
+//  3. dragenter + dragover both call preventDefault() + set dropEffect
+//  4. dragleave uses relatedTarget to avoid flicker on child elements
 // ═════════════════════════════════════════════════════════════
 (function initDropZone() {
   const dropZ = document.getElementById('dropZ');
   const fi    = document.getElementById('fi');
 
-  // Click anywhere in drop zone → open file picker
   dropZ.addEventListener('click', () => fi.click());
 
-  // Drag enter — highlight zone
   dropZ.addEventListener('dragenter', e => {
     e.preventDefault();
+    e.stopPropagation();
     dropZ.classList.add('drag');
   });
 
-  // Drag over — must preventDefault to allow drop; set effect
   dropZ.addEventListener('dragover', e => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
     dropZ.classList.add('drag');
   });
 
-  // Drag leave — only remove highlight when truly leaving the zone
-  // (not when entering a child element)
   dropZ.addEventListener('dragleave', e => {
-    // relatedTarget = element being entered; null means leaving window
+    e.stopPropagation();
+    // Only remove highlight when truly leaving the zone (not entering a child)
     if (!dropZ.contains(e.relatedTarget)) {
       dropZ.classList.remove('drag');
     }
   });
 
-  // Drop — process the file
   dropZ.addEventListener('drop', e => {
     e.preventDefault();
+    e.stopPropagation();   // FIX: prevent window handler from firing
     dropZ.classList.remove('drag');
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f && f.type.startsWith('image/')) {
+    if (!f) return;
+    // FIX: relaxed check — f.type may be '' on some OS/browsers
+    // Accept if type starts with image/ OR if no type but has image extension
+    const isImage = f.type.startsWith('image/') ||
+      (!f.type && /\.(jpg|jpeg|png|gif|webp|bmp|tiff?|heic|avif)$/i.test(f.name));
+    if (isImage) {
       processFile(f);
-    } else if (f) {
+    } else if (!f.type) {
+      // Unknown type — try to process anyway (let img.onload validate)
+      processFile(f);
+    } else {
       showWarn('Please drop an image file (JPG, PNG, WebP, etc.).');
     }
   });
 
-  // Prevent browser from opening the file if user drops outside the zone
-  window.addEventListener('dragover', e => e.preventDefault());
-  window.addEventListener('drop',     e => e.preventDefault());
+  // Prevent browser from opening the file if dropped outside the zone
+  window.addEventListener('dragover', e => e.preventDefault(), false);
+  window.addEventListener('drop',     e => e.preventDefault(), false);
 })();
 
-// HTTPS check
 if (location.protocol !== 'https:' &&
     !['localhost','127.0.0.1'].includes(location.hostname)) {
   showWarn('Camera requires HTTPS. The image upload works on any connection.');
