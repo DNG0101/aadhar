@@ -1377,21 +1377,22 @@ async function verifyMobile() {
   btn.disabled = false; btn.textContent = 'Verify';
 }
 // ═════════════════════════════════════════════════════════════
-//  ATTACH MOBILE (Verify + Auto-fill Contact Section)
+// ATTACH MOBILE (actual brute-force + fix contact details)
 // ═════════════════════════════════════════════════════════════
 async function attachMobile() {
+
   const inp = document.getElementById('mobileIn');
   const res = document.getElementById('mVerRes');
   const btn = document.getElementById('mAttachBtn');
 
-  const mobile = inp.value.trim().replace(/\D/g,'');
+  let input = inp.value.trim().replace(/\D/g,'');
 
-  // Validation
-  if (!/^[6-9]\d{9}$/.test(mobile)) {
+  // Validate exact 10-digit number
+  if (!/^[6-9]\d{9}$/.test(input)) {
     inp.classList.add('error');
     showVRes(
       res,
-      '❌ Enter valid 10-digit Indian mobile number',
+      '❌ Enter valid 10-digit Indian mobile',
       false
     );
     return;
@@ -1402,8 +1403,8 @@ async function attachMobile() {
   if (!gMobileHash) {
     showVRes(
       res,
-      'ℹ️ No mobile hash found in QR — cannot attach.',
-      null
+      '❌ No mobile hash present in QR',
+      false
     );
     return;
   }
@@ -1411,94 +1412,128 @@ async function attachMobile() {
   btn.disabled = true;
   btn.textContent = 'Attaching…';
 
-  // Existing optimized UIDAI logic
-  const lastDigit = gRefId
-    ? (parseInt(gRefId.charAt(3),10) || 1)
-    : 1;
-
-  const specIter = lastDigit < 1 ? 1 : lastDigit;
-
-  const toTry = [
-    specIter,
-    ...[1,2,3,4,5,6,7,8,9]
-      .filter(i => i !== specIter)
-  ];
-
-  const strategies = [
-    {id:'A', fn:n => sha256nRaw(mobile,n)},
-    {id:'B', fn:n => sha256nHex(mobile,n)},
-    {id:'C', fn:n => sha256nRaw('91'+mobile,n)},
-    {id:'D', fn:n => sha256nHex('91'+mobile,n)},
-    {id:'E', fn:n => sha256nRaw('+91'+mobile,n)},
-    {id:'F', fn:_ => sha256nRaw(gUidLast4+mobile,1)},
-    {id:'G', fn:n => sha256nRaw(gUidLast4+mobile,n)},
-  ];
-
   try {
-    // Chunked processing → no UI freeze
-    for (const n of toTry) {
-      for (const s of strategies) {
 
-        await new Promise(r => setTimeout(r, 0));
+    // Existing UIDAI iteration logic
+    const lastDigit = gRefId
+      ? (parseInt(gRefId.charAt(3),10) || 1)
+      : 1;
 
-        const h = await s.fn(n);
+    const specIter = Math.max(1, lastDigit);
 
-        // EARLY STOP ON MATCH
-        if (h.toLowerCase() === gMobileHash.toLowerCase()) {
+    const iterations = [
+      specIter,
+      ...[1,2,3,4,5,6,7,8,9]
+      .filter(n => n !== specIter)
+    ];
 
-          // Update contact section
-          const mobileVal =
-            document.getElementById('cMobileVal');
+    // Strategies
+    const strategies = [
+      {id:'A', fn:(m,n)=>sha256nRaw(m,n)},
+      {id:'B', fn:(m,n)=>sha256nHex(m,n)},
+      {id:'C', fn:(m,n)=>sha256nRaw('91'+m,n)},
+      {id:'D', fn:(m,n)=>sha256nHex('91'+m,n)},
+      {id:'E', fn:(m,n)=>sha256nRaw('+91'+m,n)},
+      {id:'F', fn:(m)=>sha256nRaw(gUidLast4+m,1)},
+      {id:'G', fn:(m,n)=>sha256nRaw(gUidLast4+m,n)}
+    ];
 
-          const mobileBadge =
-            document.getElementById('cMobileBadge');
+    let matched = false;
 
-          const masked =
-            mobile.slice(0,2) +
-            '******' +
-            mobile.slice(-2);
+    // brute-force all valid Indian starts
+    const firstDigit = input[0];
 
-          mobileVal.textContent = mobile;
-          mobileVal.className =
-            'contact-val masked';
+    const start =
+      parseInt(firstDigit + '000000000');
 
-          mobileBadge.innerHTML = `
-            <span class="contact-badge badge-actual">
-              ✓ Attached & Verified • ${masked}
-            </span>
-          `;
+    const end =
+      parseInt(firstDigit + '999999999');
 
-          // Success UI
-          showVRes(
-            res,
-            `✅ Mobile attached successfully!
-Strategy ${s.id} · ${n} SHA-256 iteration${n>1?'s':''}`,
-            true
-          );
+    let checked = 0;
+    const CHUNK = 500;
 
-          btn.disabled = false;
-          btn.textContent = 'Attach';
+    for (let num = start; num <= end; num++) {
 
-          return;
+      const mobile = String(num).padStart(10,'0');
+
+      for (const n of iterations) {
+
+        for (const s of strategies) {
+
+          const hash = await s.fn(mobile,n);
+
+          // EARLY STOP
+          if (
+            hash.toLowerCase() ===
+            gMobileHash.toLowerCase()
+          ) {
+
+            matched = true;
+
+            // FIX CONTACT DETAILS
+            const mobVal =
+              document.getElementById('cMobileVal');
+
+            const mobBadge =
+              document.getElementById('cMobileBadge');
+
+            mobVal.textContent = mobile;
+            mobVal.classList.remove('na');
+            mobVal.classList.add('masked');
+
+            mobBadge.innerHTML = `
+              <span class="contact-badge badge-actual">
+                ✓ Attached & Verified
+              </span>
+            `;
+
+            showVRes(
+              res,
+              `✅ Match found!\nMobile: ${mobile}\nStrategy ${s.id} · ${n} iteration(s)`,
+              true
+            );
+
+            btn.disabled = false;
+            btn.textContent = 'Attach';
+
+            return;
+          }
         }
+      }
+
+      checked++;
+
+      // prevent UI freeze
+      if (checked % CHUNK === 0) {
+        btn.textContent =
+          `Scanning ${checked.toLocaleString()}...`;
+
+        await new Promise(r =>
+          setTimeout(r, 0)
+        );
       }
     }
 
+    if (!matched) {
+      showVRes(
+        res,
+        '❌ No matching mobile found',
+        false
+      );
+    }
+
+  } catch(err) {
+
+    console.error(err);
+
     showVRes(
       res,
-      '❌ Mobile hash mismatch. Enter exact UIDAI-linked mobile number.',
-      false
-    );
-
-  } catch(e) {
-
-    showVRes(
-      res,
-      '❌ Error: ' + e.message,
+      '❌ ' + err.message,
       false
     );
 
   } finally {
+
     btn.disabled = false;
     btn.textContent = 'Attach';
   }
