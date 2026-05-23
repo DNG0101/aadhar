@@ -159,37 +159,66 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 .rk{font-size:.64rem;color:var(--dim);font-weight:500;min-width:108px;flex-shrink:0;padding-top:1px}
 .rv{font-size:.77rem;font-weight:600;color:var(--txt);word-break:break-word;flex:1}
 .rv.na{color:#9ca3af;font-weight:400;font-style:italic}
+.rv.linked{color:var(--ok)}
+.rv.notlinked{color:var(--dim);font-weight:400;font-style:italic}
 .gbadge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.68rem;font-weight:700}
 .gM{background:#dbeafe;color:#1d4ed8}.gF{background:#fce7f3;color:#be185d}
 .gT{background:#f3e8ff;color:#7c3aed}
 
-/* ── VERIFICATION SECTIONS ── */
-.vsec{padding:12px 15px;background:linear-gradient(135deg,#e8f5e9,#f1f8e9);
-  border-top:1px solid #c8e6c9;border-bottom:1px solid #c8e6c9}
-.vsec.email{background:linear-gradient(135deg,#e3f2fd,#e1f5fe);border-color:#b3e5fc}
-.vtitle{font-size:.68rem;font-weight:800;color:var(--ok);margin-bottom:4px;
-  display:flex;align-items:center;gap:5px;text-transform:uppercase;letter-spacing:.5px}
-.vsub{font-size:.63rem;color:#555;margin-bottom:9px;line-height:1.4}
+/* ── CONTACT SECTION ── */
+.contact-sec{padding:10px 15px 12px;
+  background:linear-gradient(135deg,#f0fdf4,#ecfdf5);
+  border-top:1px solid #bbf7d0;border-bottom:1px solid #bbf7d0}
+.contact-title{font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+  color:#065f46;padding-bottom:7px;border-bottom:2px solid #a7f3d0;
+  margin-bottom:8px;display:flex;align-items:center;gap:5px}
+.contact-row{display:flex;align-items:center;gap:10px;padding:6px 0;
+  border-bottom:1px solid #d1fae5}
+.contact-row:last-child{border-bottom:none}
+.contact-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;
+  justify-content:center;font-size:15px;flex-shrink:0}
+.contact-icon.mob{background:#d1fae5}
+.contact-icon.eml{background:#dbeafe}
+.contact-info{flex:1;min-width:0}
+.contact-label{font-size:.58rem;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.contact-val{font-size:.82rem;font-weight:700;color:#111827;margin-top:1px;word-break:break-all}
+.contact-val.masked{font-family:'Courier New',monospace;letter-spacing:2px;color:var(--pri)}
+.contact-val.na{color:#9ca3af;font-weight:400;font-style:italic;font-size:.75rem}
+.contact-badge{display:inline-flex;align-items:center;gap:3px;font-size:.6rem;
+  font-weight:700;padding:2px 7px;border-radius:20px;margin-top:3px}
+.badge-linked{background:#dcfce7;color:#166534}
+.badge-notlinked{background:#f3f4f6;color:#6b7280}
+.badge-actual{background:#dbeafe;color:#1e40af}
+
+/* ── ADVANCED VERIFY (collapsible) ── */
+.adv-toggle{margin:0 15px 0;padding:7px 10px;background:#fafafa;
+  border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:.67rem;
+  color:#4b5563;font-weight:600;display:flex;align-items:center;justify-content:space-between;
+  user-select:none;transition:background .15s}
+.adv-toggle:hover{background:#f3f4f6}
+.adv-body{margin:0 15px;border:1px solid #e5e7eb;border-top:none;
+  border-radius:0 0 8px 8px;background:#fafafa;display:none;padding:10px 12px}
+.adv-body.open{display:block}
+.vsec-inner{margin-bottom:10px}
+.vsec-inner:last-child{margin-bottom:0}
+.vsec-label{font-size:.63rem;font-weight:700;color:#374151;margin-bottom:5px;
+  display:flex;align-items:center;gap:4px}
 .vinput-row{display:flex;gap:7px}
-.vinput{flex:1;padding:9px 11px;border:1.5px solid #a5d6a7;border-radius:8px;
-  font-size:.82rem;font-family:inherit;outline:none;background:#fff;
-  transition:border-color .2s}
+.vinput{flex:1;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:7px;
+  font-size:.8rem;font-family:inherit;outline:none;background:#fff;transition:border-color .2s}
 .vinput:focus{border-color:var(--ok)}
 .vinput.error{border-color:var(--err)}
-.vbtn{padding:9px 15px;background:var(--ok);color:#fff;border:none;
-  border-radius:8px;font-size:.79rem;font-weight:700;cursor:pointer;
-  white-space:nowrap;transition:background .2s;min-width:80px}
+.vbtn{padding:8px 13px;background:var(--ok);color:#fff;border:none;
+  border-radius:7px;font-size:.76rem;font-weight:700;cursor:pointer;
+  white-space:nowrap;transition:background .2s;min-width:72px}
 .vbtn:hover{background:#1b5e20}.vbtn:disabled{background:#9ca3af;cursor:not-allowed}
-.vresult{margin-top:8px;font-size:.78rem;font-weight:700;padding:7px 10px;
-  border-radius:7px;display:none;white-space:pre-line;line-height:1.5}
+.vbtn.email-btn{background:#1565c0}.vbtn.email-btn:hover{background:#0d47a1}
+.vresult{margin-top:7px;font-size:.74rem;font-weight:600;padding:6px 9px;
+  border-radius:6px;display:none;white-space:pre-line;line-height:1.5}
 .vresult.show{display:block}
 .vresult.ok{background:#dcfce7;color:#14532d;border:1px solid #86efac}
 .vresult.fail{background:#fee2e2;color:#7f1d1d;border:1px solid #fca5a5}
 .vresult.info{background:#eff6ff;color:#1e40af;border:1px solid #93c5fd}
-.vhash{font-size:.62rem;font-family:'Courier New',monospace;color:var(--dim);
-  margin-top:5px;word-break:break-all}
-.hash-missing{font-size:.72rem;color:#b45309;background:#fff7ed;border:1px solid #fcd34d;
-  border-radius:7px;padding:7px 10px;margin-top:8px;line-height:1.5}
 
 .hrow{display:flex;padding:6px 0;gap:8px;border-bottom:1px solid #f5f3ff;align-items:flex-start}
 .hk{font-size:.63rem;color:var(--dim);min-width:108px;flex-shrink:0}
@@ -218,7 +247,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
   flex-shrink:0;margin-top:1px}
 .tipt{font-size:.72rem;color:var(--txt);line-height:1.55}
 .tipt strong{color:var(--pri)}
-.tipt code{background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:.67rem;font-family:monospace}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
   z-index:1000;align-items:center;justify-content:center}
 .overlay.show{display:flex}
@@ -231,7 +259,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
   <div class="hdr-ico">🪪</div>
   <div>
     <h1>Aadhaar QR Scanner</h1>
-    <p>Official UIDAI Spec · Photo · Mobile &amp; Email Verification · Camera + Upload</p>
+    <p>Official UIDAI Spec · Photo · Contact Details · Camera + Upload</p>
   </div>
 </div>
 <div class="pills">
@@ -295,11 +323,14 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
     </div>
   </div>
 
+  <!-- ═══════════ RESULT CARD ═══════════ -->
   <div class="rcard" id="resCard">
     <div class="rh" id="rHdr">
       <div class="rico" id="rIco"></div>
       <div><h2 id="rTitle"></h2><p id="rTime"></p></div>
     </div>
+
+    <!-- Photo + UID block -->
     <div class="phrow">
       <div class="photo-wrap">
         <div class="photo-ph" id="phPh"><span>👤</span><span>Photo</span></div>
@@ -314,16 +345,52 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
         <div class="uid-ind none" id="uidInd" style="display:none"></div>
       </div>
     </div>
+
+    <!-- Personal Information -->
     <div class="sec">
-      <div class="stitle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Personal Information</div>
+      <div class="stitle">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Personal Information
+      </div>
       <div class="row"><span class="rk">Full Name</span><span class="rv" id="fName"></span></div>
       <div class="row"><span class="rk">Gender</span><span class="rv" id="fGender"></span></div>
       <div class="row"><span class="rk">Date of Birth</span><span class="rv" id="fDob"></span></div>
       <div class="row"><span class="rk">Year of Birth</span><span class="rv" id="fYob"></span></div>
       <div class="row"><span class="rk">Care Of</span><span class="rv" id="fCo"></span></div>
     </div>
+
+    <!-- ══ CONTACT DETAILS (auto-shown after scan) ══ -->
+    <div class="contact-sec" id="contactSec" style="display:none">
+      <div class="contact-title">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="#065f46"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+        Contact Details
+      </div>
+      <!-- Mobile row -->
+      <div class="contact-row">
+        <div class="contact-icon mob">📱</div>
+        <div class="contact-info">
+          <div class="contact-label">Mobile Number</div>
+          <div class="contact-val" id="cMobileVal"></div>
+          <div id="cMobileBadge"></div>
+        </div>
+      </div>
+      <!-- Email row -->
+      <div class="contact-row">
+        <div class="contact-icon eml">📧</div>
+        <div class="contact-info">
+          <div class="contact-label">Email Address</div>
+          <div class="contact-val" id="cEmailVal"></div>
+          <div id="cEmailBadge"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Address -->
     <div class="sec">
-      <div class="stitle"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>Address</div>
+      <div class="stitle">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+        Address
+      </div>
       <div class="row"><span class="rk">House / Flat</span><span class="rv" id="fHouse"></span></div>
       <div class="row"><span class="rk">Street</span><span class="rv" id="fStreet"></span></div>
       <div class="row"><span class="rk">Landmark</span><span class="rv" id="fLm"></span></div>
@@ -336,42 +403,40 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
       <div class="row"><span class="rk">PIN Code</span><span class="rv" id="fPin"></span></div>
     </div>
 
-    <!-- Mobile verification — shown if indicator says mobile is present -->
-    <div class="vsec" id="vMobile" style="display:none">
-      <div class="vtitle">📱 Verify Mobile Number</div>
-      <div class="vsub">Enter your mobile number linked to this Aadhaar to verify it matches the stored hash.</div>
-      <div id="vMobileHashMissing" class="hash-missing" style="display:none">
-        ⚠️ Mobile hash was not extracted from this QR. Verification may not be possible. Try entering your number anyway.
-      </div>
-      <div class="vinput-row">
-        <input class="vinput" id="mobileIn" type="tel" maxlength="10" placeholder="10-digit mobile number" inputmode="numeric"/>
-        <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
-      </div>
-      <div class="vresult" id="mVerRes"></div>
-      <div class="vhash" id="mHashDisp"></div>
-    </div>
-
-    <!-- Email verification — shown if indicator says email is present -->
-    <div class="vsec email" id="vEmail" style="display:none">
-      <div class="vtitle" style="color:#1565c0">📧 Verify Email Address</div>
-      <div class="vsub">Enter your email address linked to this Aadhaar to verify it matches the stored hash.</div>
-      <div id="vEmailHashMissing" class="hash-missing" style="display:none">
-        ⚠️ Email hash was not extracted from this QR. Verification may not be possible. Try entering your email anyway.
-      </div>
-      <div class="vinput-row">
-        <input class="vinput" id="emailIn" type="email" placeholder="Email address" style="border-color:#81d4fa"/>
-        <button class="vbtn" id="eVerBtn" onclick="verifyEmail()" style="background:#1565c0">Verify</button>
-      </div>
-      <div class="vresult" id="eVerRes"></div>
-      <div class="vhash" id="eHashDisp"></div>
-    </div>
-
+    <!-- Stored Hashes -->
     <div class="sec" id="hashSec" style="display:none">
       <div class="stitle">🔐 Stored Hashes (from QR)</div>
       <div class="hrow"><span class="hk">Mobile hash</span><span class="hv" id="mHashRaw"></span></div>
       <div class="hrow"><span class="hk">Email hash</span><span class="hv" id="eHashRaw"></span></div>
     </div>
-    <div style="height:6px"></div>
+
+    <!-- Advanced: manual hash verification (collapsible) -->
+    <div id="advWrap" style="display:none;margin-top:10px">
+      <div class="adv-toggle" onclick="togAdv()">
+        <span>🔬 Advanced — Verify against stored hash</span><span id="advArr">▼</span>
+      </div>
+      <div class="adv-body" id="advBody">
+        <div class="vsec-inner" id="advMobileWrap" style="display:none">
+          <div class="vsec-label">📱 Enter mobile to verify hash</div>
+          <div class="vinput-row">
+            <input class="vinput" id="mobileIn" type="tel" maxlength="10"
+              placeholder="10-digit mobile" inputmode="numeric"/>
+            <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
+          </div>
+          <div class="vresult" id="mVerRes"></div>
+        </div>
+        <div class="vsec-inner" id="advEmailWrap" style="display:none">
+          <div class="vsec-label">📧 Enter email to verify hash</div>
+          <div class="vinput-row">
+            <input class="vinput" id="emailIn" type="email" placeholder="Email address"/>
+            <button class="vbtn email-btn" id="eVerBtn" onclick="verifyEmail()">Verify</button>
+          </div>
+          <div class="vresult" id="eVerRes"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="height:8px"></div>
     <div class="toggle" onclick="togDbg()"><span>🔧 Debug / Parse Log</span><span id="dbgArr">▼</span></div>
     <div class="dbgpanel" id="dbgP"></div>
     <div class="toggle" style="margin-top:5px" onclick="togRaw()"><span>📄 Raw Segments</span><span id="rawArr">▼</span></div>
@@ -381,10 +446,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 
   <div class="tips">
     <h3>💡 Tips for best results</h3>
-    <div class="tip"><div class="tipn">1</div><div class="tipt"><strong>Camera uses native BarcodeDetector API</strong> on Android Chrome / Samsung Browser / Safari iOS 17+ — hardware-accelerated with ImageCapture for sharper frames. Falls back to jsQR with contrast boost.</div></div>
-    <div class="tip"><div class="tipn">2</div><div class="tipt"><strong>Upload uses QrScanner (ZXing TRY_HARDER)</strong> as primary — handles 177×177 Version-40 dense QR. Falls back through ZXing and jsQR at multiple scales.</div></div>
-    <div class="tip"><div class="tipn">3</div><div class="tipt"><strong>Photo</strong> — stored as JPEG2000 (JP2) inside the QR. Decoded via embedded PDF engine. Click photo to enlarge.</div></div>
-    <div class="tip"><div class="tipn">4</div><div class="tipt"><strong>Mobile/Email verification</strong> — tries SHA-256 applied 1–9 times (raw bytes &amp; hex-string modes) plus with/without "91" prefix per all known UIDAI QR generator versions.</div></div>
+    <div class="tip"><div class="tipn">1</div><div class="tipt"><strong>Camera uses native BarcodeDetector + ImageCapture</strong> for hardware-accelerated scanning with sharper frames. Falls back to jsQR with contrast enhancement.</div></div>
+    <div class="tip"><div class="tipn">2</div><div class="tipt"><strong>Mobile &amp; Email</strong> are shown automatically from the QR — actual values if present (old XML format), or linked/not-linked status for Secure QR (hash only).</div></div>
+    <div class="tip"><div class="tipn">3</div><div class="tipt"><strong>Old XML QR</strong> (pre-2018) contains the actual mobile number and email. <strong>Secure QR</strong> (post-2018) stores only SHA-256 hashes for privacy.</div></div>
+    <div class="tip"><div class="tipn">4</div><div class="tipt"><strong>Advanced verification</strong> — tap the verify panel to cross-check your mobile/email against the stored hash using all known UIDAI hash strategies.</div></div>
   </div>
 </div>
 
@@ -394,28 +459,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-//  AADHAAR QR SCANNER — Updated Version
-//
-//  IMPROVEMENT #1 — FASTER CAMERA SCANNING:
-//    • Uses ImageCapture.grabFrame() for sharper stills when available
-//    • Contrast-enhanced canvas pass for jsQR fallback
-//    • Removed 2s scanMove animation delay, reduced to 1.5s
-//    • BarcodeDetector path is non-blocking; jsQR path has contrast boost
-//
-//  IMPROVEMENT #2 — MOBILE/EMAIL VERIFICATION:
-//    • Shows verification sections whenever indicator says they should
-//      be present, even if hash bytes couldn't be extracted
-//    • Tries SEVEN hash strategies per iteration count 1–9:
-//        A) SHA256^N(input) — raw bytes chained [UIDAI spec]
-//        B) SHA256^N(input) — hex-string chained [alt implementations]
-//        C) SHA256^N("91"+input) — with ISD code [some generators]
-//        D) SHA256^N("91"+input) — hex-string chained
-//        E) SHA256^N(input.toLowerCase()) — normalised email
-//        F) SHA256(salt + input) — single-round with Aadhaar last4
-//        G) HMAC-SHA256 style: SHA256(last4 || input)
-//    • Shows exactly which strategy matched for transparency
-//
-//  IMPROVEMENT #3 — DRAG & DROP unchanged (was already fixed)
+//  AADHAAR QR SCANNER — Final Version
+//  Key features:
+//  • Contacts auto-displayed after scan (no manual entry needed)
+//  • Old XML: shows actual mobile & email values from QR
+//  • Secure QR: shows Linked/Not Linked status with hash badge
+//  • Advanced verify section is collapsible (for hash checking)
+//  • Fast camera: ImageCapture + contrast boost
 // ═══════════════════════════════════════════════════════════════
 
 if (typeof pdfjsLib !== 'undefined') {
@@ -428,21 +478,18 @@ if (typeof QrScanner !== 'undefined') {
 }
 
 // ─── State ────────────────────────────────────────────────────
-let stream   = null, scanning  = false, rafId = null;
-let flashOn  = false, afOn     = true,  vTrack = null;
-let rawOpen  = false, dbgOpen  = false;
-let gRefId   = '', gMobileHash = '', gEmailHash = '', gIndicator = 0;
+let stream = null, scanning = false, rafId = null;
+let flashOn = false, afOn = true, vTrack = null;
+let rawOpen = false, dbgOpen = false, advOpen = false;
+let gRefId = '', gMobileHash = '', gEmailHash = '', gIndicator = 0;
 let gPhotoBytes = null, gUidLast4 = '';
-let barcodeDetector = null;
-let detecting = false;
-let imageCapture = null;   // NEW: ImageCapture API for sharper frames
+let barcodeDetector = null, imageCapture = null, detecting = false;
 
 const video = document.getElementById('video');
 const sc    = document.getElementById('sc');
 const ctx   = sc.getContext('2d', {willReadFrequently: true});
 const cst   = document.getElementById('cst');
 const fl    = document.getElementById('fl');
-
 const dbgLines = [];
 
 let aux2x = null;
@@ -453,7 +500,7 @@ function getAux(w, h) {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  CAMERA SCANNING — IMPROVEMENT #1 (faster + ImageCapture)
+//  CAMERA — fast scanning with ImageCapture + contrast boost
 // ═════════════════════════════════════════════════════════════
 async function startCam() {
   if (scanning) return;
@@ -462,83 +509,62 @@ async function startCam() {
     stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: {ideal: 'environment'},
-        width:  {ideal: 1920},
-        height: {ideal: 1080},
-        // Request continuous autofocus & exposure for faster lock
-        focusMode:   {ideal: 'continuous'},
-        exposureMode:{ideal: 'continuous'},
-        whiteBalanceMode:{ideal: 'continuous'}
+        width: {ideal: 1920}, height: {ideal: 1080},
+        focusMode: {ideal: 'continuous'},
+        exposureMode: {ideal: 'continuous'},
+        whiteBalanceMode: {ideal: 'continuous'}
       },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
-    vTrack    = stream.getVideoTracks()[0];
-    scanning  = true;
-    detecting = false;
+    vTrack = stream.getVideoTracks()[0];
+    scanning = true; detecting = false;
 
-    // Try ImageCapture for sharper stills (Android Chrome / Chromium)
     imageCapture = null;
     if (typeof ImageCapture !== 'undefined' && vTrack) {
       try { imageCapture = new ImageCapture(vTrack); dbg('ok', 'ImageCapture ready'); }
-      catch(e) { dbg('warn', 'ImageCapture init: ' + e.message); }
+      catch(e) { dbg('warn', 'ImageCapture: ' + e.message); }
     }
 
-    // Init native BarcodeDetector
     barcodeDetector = null;
     if ('BarcodeDetector' in window) {
       try {
-        const supported = await BarcodeDetector.getSupportedFormats().catch(() => []);
-        if (!supported.length || supported.includes('qr_code')) {
+        const sup = await BarcodeDetector.getSupportedFormats().catch(() => []);
+        if (!sup.length || sup.includes('qr_code')) {
           barcodeDetector = new BarcodeDetector({formats: ['qr_code']});
-          dbg('ok', 'BarcodeDetector API ready (hardware-accelerated)');
+          dbg('ok', 'BarcodeDetector ready');
         }
-      } catch(e) { dbg('warn', 'BarcodeDetector init: ' + e.message); }
-    } else {
-      dbg('inf', 'BarcodeDetector not available — using jsQR with contrast boost');
+      } catch(e) { dbg('warn', 'BarcodeDetector: ' + e.message); }
     }
 
     cst.textContent = 'Point camera at the Aadhaar QR code';
-    setBtnLd(false);
-    setBtnState('scanning');
-    tick();
+    setBtnLd(false); setBtnState('scanning'); tick();
   } catch(e) {
     setBtnLd(false);
-    showErr(e.name === 'NotAllowedError'
-      ? 'Camera denied — use the upload option below'
-      : e.name === 'NotFoundError'
-      ? 'No camera found — use upload below'
-      : 'Camera: ' + e.message);
+    showErr(e.name === 'NotAllowedError' ? 'Camera denied — use upload below'
+          : e.name === 'NotFoundError'   ? 'No camera found — use upload below'
+          : 'Camera: ' + e.message);
   }
 }
 
-// ── tick — BarcodeDetector (grabFrame) → jsQR (contrast boost) ─
 function tick() {
   if (!scanning) return;
-  if (video.readyState < 2 || !video.videoWidth) {
-    rafId = requestAnimationFrame(tick); return;
-  }
+  if (video.readyState < 2 || !video.videoWidth) { rafId = requestAnimationFrame(tick); return; }
 
-  // PATH A: Native BarcodeDetector (async, hardware-accelerated)
   if (barcodeDetector && !detecting) {
     detecting = true;
-
-    // Prefer ImageCapture.grabFrame() — gives a sharper ImageBitmap
-    const framePromise = (imageCapture && imageCapture.grabFrame)
+    const frameP = (imageCapture && imageCapture.grabFrame)
       ? imageCapture.grabFrame().catch(() => video)
       : Promise.resolve(video);
-
-    framePromise.then(source => {
-      if (!scanning) { detecting = false; return; }
-      return barcodeDetector.detect(source);
+    frameP.then(src => {
+      if (!scanning) { detecting = false; return null; }
+      return barcodeDetector.detect(src);
     }).then(results => {
       detecting = false;
-      if (!scanning) return;
-      if (results && results.length > 0) {
-        onCameraHit(results[0].rawValue || '', null);
-      } else {
-        rafId = requestAnimationFrame(tick);
-      }
+      if (!scanning || !results) return;
+      if (results.length > 0) onCameraHit(results[0].rawValue || '', null);
+      else rafId = requestAnimationFrame(tick);
     }).catch(() => {
       detecting = false;
       if (!scanning) return;
@@ -548,95 +574,71 @@ function tick() {
     return;
   }
 
-  // PATH B: jsQR with contrast boost (when no BarcodeDetector)
   if (!barcodeDetector) {
     if (jsqrFrame()) return;
   }
-
   rafId = requestAnimationFrame(tick);
 }
 
-// ── jsQR frame decode with contrast enhancement ──────────────
 function jsqrFrame() {
   if (!scanning) return false;
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return false;
-
   if (sc.width !== vw || sc.height !== vh) { sc.width = vw; sc.height = vh; }
-
-  // Apply contrast filter before drawing — dramatically helps dense QR
   ctx.filter = 'contrast(1.4) brightness(1.05)';
   ctx.drawImage(video, 0, 0);
   ctx.filter = 'none';
-
   const imgData = ctx.getImageData(0, 0, vw, vh);
-
   let code = null;
   try { code = jsQR(imgData.data, vw, vh, {inversionAttempts: 'dontInvert'}); } catch(e) {}
-  if (!code) {
-    try { code = jsQR(imgData.data, vw, vh, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
-  }
-  // Additional contrast-sharpened pass on greyscale
+  if (!code) try { code = jsQR(imgData.data, vw, vh, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
   if (!code) {
     try {
       const gd = sharpenGrey(imgData);
       code = jsQR(gd.data, vw, vh, {inversionAttempts: 'attemptBoth'});
     } catch(e) {}
   }
-  // 2× upscale pass — helps with small/far QR codes
   if (!code) {
     try {
-      const c2  = getAux(vw * 2, vh * 2);
+      const c2 = getAux(vw * 2, vh * 2);
       const cx2 = c2.getContext('2d', {willReadFrequently: true});
       cx2.filter = 'contrast(1.5)';
       cx2.drawImage(sc, 0, 0, vw * 2, vh * 2);
       cx2.filter = 'none';
       code = jsQR(cx2.getImageData(0, 0, vw * 2, vh * 2).data, vw * 2, vh * 2,
-                  {inversionAttempts: 'attemptBoth'});
+        {inversionAttempts: 'attemptBoth'});
     } catch(e) {}
   }
-
   if (code) { onCameraHit(code.data || code.text || '', code.binaryData || null); return true; }
   return false;
 }
 
-// ── Sharpen greyscale for dense QR ───────────────────────────
 function sharpenGrey(id) {
   const d = new Uint8ClampedArray(id.data);
   for (let i = 0; i < d.length; i += 4) {
-    // Convert to greyscale, then apply S-curve contrast
     const lum = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-    // High-contrast threshold: values above 128 → 255, below → 0 with mid sigmoid
-    const g = lum > 128 ? Math.min(255, lum * 1.35) : Math.max(0, lum * 0.65);
+    const g   = lum > 128 ? Math.min(255, lum * 1.35) : Math.max(0, lum * 0.65);
     d[i] = d[i+1] = d[i+2] = g;
   }
   return new ImageData(d, id.width, id.height);
 }
 
 function onCameraHit(raw, binary) {
-  scanning = false;
-  cancelAnimationFrame(rafId);
-  doFlash();
-  cst.textContent = '✅ QR Found! Parsing…';
-  parseQR(raw, binary);
+  scanning = false; cancelAnimationFrame(rafId); doFlash();
+  cst.textContent = '✅ QR Found! Parsing…'; parseQR(raw, binary);
 }
 
 // ═════════════════════════════════════════════════════════════
 //  FILE UPLOAD
 // ═════════════════════════════════════════════════════════════
-function onFile(e) {
-  const f = e.target.files[0];
-  if (f) processFile(f);
-  e.target.value = '';
-}
+function onFile(e) { const f = e.target.files[0]; if (f) processFile(f); e.target.value = ''; }
 
 function processFile(file) {
   hideMsg(); stopCam(false); showProg(file);
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
-    document.getElementById('pDim').textContent =
-      `${img.naturalWidth}×${img.naturalHeight}px`;
+    document.getElementById('pDim').textContent = `${img.naturalWidth}×${img.naturalHeight}px`;
     scanImage(img, file, url);
   };
   img.onerror = () => { showErr('Cannot load image.'); hideProg(); };
@@ -652,24 +654,20 @@ async function scanImage(img, file, url) {
   const zxingAvail     = typeof ZXing     !== 'undefined';
 
   const attempts = [
-    ...(qrScannerAvail ? [
-      {lbl: 'QrScanner',   method: 'qrs',   scale: 1,   grey: false},
-    ] : []),
+    ...(qrScannerAvail ? [{lbl:'QrScanner', method:'qrs', scale:1, grey:false}] : []),
     ...(zxingAvail ? [
-      {lbl: 'ZXing 1×',    method: 'zxing', scale: 1,   grey: false},
-      {lbl: 'ZXing 2×',    method: 'zxing', scale: 2,   grey: false},
+      {lbl:'ZXing 1×', method:'zxing', scale:1, grey:false},
+      {lbl:'ZXing 2×', method:'zxing', scale:2, grey:false},
     ] : []),
-    {lbl: 'jsQR 1×',     method: 'jsqr',  scale: 1,   grey: false},
-    {lbl: 'jsQR 2×',     method: 'jsqr',  scale: 2,   grey: false},
-    {lbl: 'jsQR 1.5×',   method: 'jsqr',  scale: 1.5, grey: false},
-    {lbl: 'jsQR 3×',     method: 'jsqr',  scale: 3,   grey: false},
-    {lbl: 'jsQR grey',   method: 'jsqr',  scale: 1,   grey: true},
-    {lbl: 'jsQR grey2×', method: 'jsqr',  scale: 2,   grey: true},
-    {lbl: 'jsQR 0.75×',  method: 'jsqr',  scale: 0.75,grey: false},
-    {lbl: 'jsQR 4×',     method: 'jsqr',  scale: 4,   grey: false},
-    ...(zxingAvail ? [
-      {lbl: 'ZXing grey',  method: 'zxing', scale: 1,   grey: true},
-    ] : []),
+    {lbl:'jsQR 1×',     method:'jsqr', scale:1,    grey:false},
+    {lbl:'jsQR 2×',     method:'jsqr', scale:2,    grey:false},
+    {lbl:'jsQR 1.5×',   method:'jsqr', scale:1.5,  grey:false},
+    {lbl:'jsQR 3×',     method:'jsqr', scale:3,    grey:false},
+    {lbl:'jsQR grey',   method:'jsqr', scale:1,    grey:true},
+    {lbl:'jsQR grey2×', method:'jsqr', scale:2,    grey:true},
+    {lbl:'jsQR 0.75×',  method:'jsqr', scale:0.75, grey:false},
+    {lbl:'jsQR 4×',     method:'jsqr', scale:4,    grey:false},
+    ...(zxingAvail ? [{lbl:'ZXing grey', method:'zxing', scale:1, grey:true}] : []),
   ];
 
   chips.innerHTML = attempts.map((a, i) =>
@@ -688,12 +686,10 @@ async function scanImage(img, file, url) {
 
     try {
       let code = null;
-
       if (a.method === 'qrs') {
         try {
           const result = await QrScanner.scanImage(file, {
-            returnDetailedScanResult: true,
-            alsoTryWithoutScanRegion: true,
+            returnDetailedScanResult: true, alsoTryWithoutScanRegion: true
           });
           if (result && result.data) code = {data: result.data, binaryData: null};
         } catch(e) {
@@ -707,11 +703,9 @@ async function scanImage(img, file, url) {
         ctx.drawImage(img, 0, 0, sw, sh);
         let id = ctx.getImageData(0, 0, sw, sh);
         if (a.grey) id = toGrey(id);
-
         if (a.method === 'jsqr') {
           code = jsQR(id.data, sw, sh, {inversionAttempts: 'dontInvert'});
-          if (!code)
-            code = jsQR(id.data, sw, sh, {inversionAttempts: 'attemptBoth'});
+          if (!code) code = jsQR(id.data, sw, sh, {inversionAttempts: 'attemptBoth'});
         } else if (a.method === 'zxing') {
           code = await tryZXingAsync(sc);
         }
@@ -719,8 +713,7 @@ async function scanImage(img, file, url) {
 
       if (code) {
         document.getElementById('chip' + i).className = 'chip ok';
-        fill.style.width = '100%';
-        lab.textContent  = `✅ QR found via ${a.lbl}!`;
+        fill.style.width = '100%'; lab.textContent = `✅ QR found via ${a.lbl}!`;
         doFlash(); found = code; break;
       } else {
         document.getElementById('chip' + i).className = 'chip f';
@@ -732,24 +725,17 @@ async function scanImage(img, file, url) {
   }
 
   URL.revokeObjectURL(url);
-
   if (found) {
     cst.textContent = '✅ Parsing…';
     parseQR(found.data || found.text || '', found.binaryData || null);
   } else {
-    fill.style.width = '100%';
-    lab.textContent  = '❌ No QR detected';
-    cst.textContent  = 'No QR found';
-    showErr(
-      'No QR code detected after ' + attempts.length + ' attempts. ' +
-      'Make sure the full Aadhaar QR is visible and in focus. ' +
-      'Best: use mAadhaar app screenshot or UIDAI portal PDF screenshot.'
-    );
+    fill.style.width = '100%'; lab.textContent = '❌ No QR detected'; cst.textContent = 'No QR found';
+    showErr('No QR code detected after ' + attempts.length + ' attempts. ' +
+      'Make sure the full Aadhaar QR is visible and in focus.');
     setBtnState('idle');
   }
 }
 
-// ─── ZXing helpers ────────────────────────────────────────────
 function tryZXing(cvs) {
   if (typeof ZXing === 'undefined') return null;
   try {
@@ -767,25 +753,20 @@ function tryZXing(cvs) {
       const result = reader.decode(bitmap);
       if (result) return {data: result.getText(), binaryData: null};
     }
-  } catch(e) {
-    if (e?.name !== 'NotFoundException') dbg('warn', 'ZXing: ' + e.message);
-  }
+  } catch(e) { if (e?.name !== 'NotFoundException') dbg('warn', 'ZXing: ' + e.message); }
   return null;
 }
 
 async function tryZXingAsync(cvs) {
   if (typeof ZXing === 'undefined') return null;
   try {
-    const r = tryZXing(cvs);
-    if (r) return r;
+    const r = tryZXing(cvs); if (r) return r;
     if (ZXing.BrowserQRCodeReader) {
       const reader = new ZXing.BrowserQRCodeReader();
       const result = await reader.decodeFromCanvas(cvs);
       if (result) return {data: result.getText(), binaryData: null};
     }
-  } catch(e) {
-    if (e?.name !== 'NotFoundException') dbg('warn', 'ZXingAsync: ' + e.message);
-  }
+  } catch(e) { if (e?.name !== 'NotFoundException') dbg('warn', 'ZXingAsync: ' + e.message); }
   return null;
 }
 
@@ -807,9 +788,7 @@ function parseQR(raw, binary) {
   const s = raw.trim();
   dbg('inf', `QR: ${s.length} chars | bin: ${binary ? binary.length : 0}B`);
   dbg('inf', `Preview: "${s.slice(0, 80)}"`);
-
   if (tryXML(s)) return;
-
   if (/^\d+$/.test(s) && s.length > 20) {
     dbg('ok', `Numeric: ${s.length} digits`);
     const bytes = bigToBytes(s);
@@ -825,7 +804,6 @@ function parseQR(raw, binary) {
       }
     }
   }
-
   if (binary && binary.length > 20) {
     const arr = binary instanceof Uint8Array ? binary : new Uint8Array(binary);
     dbg('inf', `Binary: ${arr.length}B. First 8: ${h8(arr)}`);
@@ -838,14 +816,13 @@ function parseQR(raw, binary) {
       if (trySecure(arr, 'C-raw')) return;
     }
   }
-
   if (tryRegex(s)) return;
   dbg('err', 'All formats failed');
   showWarn('QR scanned but Aadhaar format not recognised. Check debug log.');
   render({}, false, 'fail');
 }
 
-// ─── Format A: Old XML ────────────────────────────────────────
+// ─── Format A: Old XML — extracts actual mobile & email ───────
 function tryXML(s) {
   if (!s.includes('PrintLetterBarcodeData') && !s.trim().startsWith('<')) {
     dbg('inf', 'No XML'); return false;
@@ -860,17 +837,26 @@ function tryXML(s) {
     if (!el || !el.getAttribute('uid')) { dbg('err', 'No uid attr'); return false; }
     dbg('ok', 'Format A XML! uid=' + el.getAttribute('uid'));
     const g = a => ((el.getAttribute(a) || '').trim());
+
+    // Old XML stores actual mobile in 'm' and email in 'e' attributes
+    const mobileActual = g('m') || g('mobile') || g('mobileNumber') || '';
+    const emailActual  = g('e') || g('email')  || g('emailId')      || '';
+    dbg('inf', `XML mobile="${mobileActual}" email="${emailActual}"`);
+
     const f = {
       uid: g('uid'), name: g('name'), gender: g('gender'), yob: g('yob'), dob: g('dob'),
       co: g('co'), house: g('house'), street: g('street'), lm: g('lm'), loc: g('loc'),
       vtc: g('vtc'), po: g('po'), dist: g('dist'), subdist: g('subdist'),
-      state: g('state'), pc: g('pc'), country: g('country')
+      state: g('state'), pc: g('pc'), country: g('country'),
+      mobileActual, emailActual,
+      // XML doesn't store hashes — actual values present
+      mobileP: !!mobileActual, emailP: !!emailActual,
+      isXML: true
     };
     render(f, null, 'xml'); return true;
   } catch(e) { dbg('err', 'XML: ' + e.message); return false; }
 }
 
-// ─── BigInt decimal → Uint8Array ─────────────────────────────
 function bigToBytes(numStr) {
   try {
     let n = BigInt(numStr);
@@ -899,12 +885,12 @@ function trySecure(bytes, tag) {
     if (segs.length < 16) { dbg('err', `Only ${segs.length} segs`); return false; }
 
     const ss = segs.map(b => dec.decode(new Uint8Array(b)));
-    const ind      = ss[0].trim(), refId   = ss[1].trim(), name  = ss[2].trim();
-    const dob      = ss[3].trim(), gender  = ss[4].trim(), co    = ss[5].trim();
-    const dist     = ss[6].trim(), lm      = ss[7].trim(), house = ss[8].trim();
-    const loc      = ss[9].trim(), pc      = ss[10].trim(), po   = ss[11].trim();
-    const state    = ss[12].trim(), street = ss[13].trim(), subdist = ss[14].trim();
-    const vtc      = ss[15].trim();
+    const ind    = ss[0].trim(), refId  = ss[1].trim(), name  = ss[2].trim();
+    const dob    = ss[3].trim(), gender = ss[4].trim(), co    = ss[5].trim();
+    const dist   = ss[6].trim(), lm     = ss[7].trim(), house = ss[8].trim();
+    const loc    = ss[9].trim(), pc     = ss[10].trim(), po   = ss[11].trim();
+    const state  = ss[12].trim(), street= ss[13].trim(), subdist= ss[14].trim();
+    const vtc    = ss[15].trim();
 
     if (!name || !/[a-zA-Z\u0900-\u097F]/.test(name)) {
       dbg('err', `[${tag}] bad name: "${name}"`); return false;
@@ -914,7 +900,6 @@ function trySecure(bytes, tag) {
     const indicator = parseInt(ind) || 0;
     const emailP    = indicator === 1 || indicator === 3;
     const mobileP   = indicator === 2 || indicator === 3;
-
     dbg('inf', `Indicator=${indicator} (email=${emailP}, mobile=${mobileP})`);
 
     let pos = 0;
@@ -927,21 +912,16 @@ function trySecure(bytes, tag) {
 
     let mobileHex = '', emailHex = '';
     if (mobStart !== null && mobStart >= 0 && mobStart + 32 <= bytes.length) {
-      mobileHex = Array.from(bytes.slice(mobStart, mobStart + 32))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-      dbg('inf', `Mobile hash @ ${mobStart}: ${mobileHex.slice(0, 16)}…`);
-      // Sanity: hash should not be all zeros
-      if (/^0+$/.test(mobileHex)) { mobileHex = ''; dbg('warn', 'Mobile hash all-zero, discarding'); }
-    } else if (mobileP) {
-      dbg('warn', `Mobile expected but hash offset invalid: mobStart=${mobStart} sigStart=${sigStart} len=${bytes.length}`);
+      const h = Array.from(bytes.slice(mobStart, mobStart + 32))
+        .map(b => b.toString(16).padStart(2,'0')).join('');
+      if (!/^0+$/.test(h)) { mobileHex = h; dbg('inf', `Mobile hash: ${h.slice(0,16)}…`); }
+      else dbg('warn', 'Mobile hash all-zero, discarding');
     }
     if (emStart !== null && emStart >= 0 && emStart + 32 <= bytes.length) {
-      emailHex = Array.from(bytes.slice(emStart, emStart + 32))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-      dbg('inf', `Email hash @ ${emStart}: ${emailHex.slice(0, 16)}…`);
-      if (/^0+$/.test(emailHex)) { emailHex = ''; dbg('warn', 'Email hash all-zero, discarding'); }
-    } else if (emailP) {
-      dbg('warn', `Email expected but hash offset invalid: emStart=${emStart}`);
+      const h = Array.from(bytes.slice(emStart, emStart + 32))
+        .map(b => b.toString(16).padStart(2,'0')).join('');
+      if (!/^0+$/.test(h)) { emailHex = h; dbg('inf', `Email hash: ${h.slice(0,16)}…`); }
+      else dbg('warn', 'Email hash all-zero, discarding');
     }
 
     let photoBytes = null;
@@ -965,7 +945,8 @@ function trySecure(bytes, tag) {
     const f = {
       uid: uidLast4 || refId, name, dob, gender, yob, co, house, street, lm,
       loc, vtc, po, dist, subdist, state, pc, country: 'India',
-      refId, indicator, mobileP, emailP, mobileHex, emailHex, tsStr, photoBytes
+      refId, indicator, mobileP, emailP, mobileHex, emailHex, tsStr, photoBytes,
+      isXML: false
     };
 
     const raw = buildSegDisplay(ss, tag, bytes.length);
@@ -974,17 +955,20 @@ function trySecure(bytes, tag) {
   } catch(e) { dbg('err', `[${tag}] ${e.message}`); return false; }
 }
 
-// ─── Format D: Regex fallback ─────────────────────────────────
 function tryRegex(s) {
   if (!s.includes('uid=')) return false;
   const g = a => { const m = s.match(new RegExp(a + '="([^"]*)"')); return m ? m[1].trim() : ''; };
   const uid = g('uid'); if (!uid) return false;
   dbg('ok', 'Regex uid=' + uid);
+  const mobileActual = g('m') || g('mobile') || '';
+  const emailActual  = g('e') || g('email')  || '';
   const f = {
     uid, name: g('name'), gender: g('gender'), yob: g('yob'), dob: g('dob'),
     co: g('co'), house: g('house'), street: g('street'), lm: g('lm'), loc: g('loc'),
     vtc: g('vtc'), po: g('po'), dist: g('dist'), subdist: g('subdist'),
-    state: g('state'), pc: g('pc')
+    state: g('state'), pc: g('pc'),
+    mobileActual, emailActual,
+    mobileP: !!mobileActual, emailP: !!emailActual, isXML: true
   };
   render(f, null, 'xml'); return true;
 }
@@ -1012,24 +996,22 @@ function render(f, rawDisp, fmt) {
     tim.textContent = 'Could not decode Aadhaar data';
   }
 
-  // UID display
-  const uid4 = document.getElementById('uid4');
-  const uidTs = document.getElementById('uidTs');
-  const uidInd = document.getElementById('uidInd');
-
+  // UID
   if (f.uid) {
     const u = f.uid.replace(/\D/g,'');
-    uid4.textContent = u.slice(-4) || f.uid;
-    uidTs.textContent = f.tsStr || '';
+    document.getElementById('uid4').textContent = u.slice(-4) || f.uid;
+    document.getElementById('uidTs').textContent = f.tsStr || '';
     if (f.refId) {
-      uidInd.style.display = 'inline-block';
-      uidInd.className = 'uid-ind present';
-      uidInd.textContent = `Ref: ${f.refId.slice(0,4)} ****`;
+      const el = document.getElementById('uidInd');
+      el.style.display = 'inline-block';
+      el.className = 'uid-ind present';
+      el.textContent = `Ref: ${f.refId.slice(0,4)} ****`;
     } else {
-      uidInd.style.display = 'none';
+      document.getElementById('uidInd').style.display = 'none';
     }
   }
 
+  // Store globals
   gRefId      = f.refId      || '';
   gMobileHash = f.mobileHex || '';
   gEmailHash  = f.emailHex  || '';
@@ -1037,6 +1019,7 @@ function render(f, rawDisp, fmt) {
   gPhotoBytes = f.photoBytes || null;
   gUidLast4   = (f.uid || '').replace(/\D/g,'').slice(-4);
 
+  // Gender badge
   const gmap = {M: 'Male', F: 'Female', T: 'Transgender'};
   const gEl  = document.getElementById('fGender');
   if (f.gender && gmap[f.gender])
@@ -1058,49 +1041,13 @@ function render(f, rawDisp, fmt) {
   setRV(document.getElementById('fState'),  f.state);
   setRV(document.getElementById('fPin'),    f.pc);
 
-  // ── Show/hide mobile verification section ─────────────────
-  const vMob = document.getElementById('vMobile');
-  const vEm  = document.getElementById('vEmail');
+  // ══ CONTACT DETAILS AUTO-DISPLAY ══
+  renderContactSection(f);
 
-  const mobileP = f.mobileP || gIndicator === 2 || gIndicator === 3;
-  const emailP  = f.emailP  || gIndicator === 1 || gIndicator === 3;
+  // ══ ADVANCED VERIFY section ══
+  renderAdvancedVerify(f);
 
-  if (mobileP) {
-    vMob.style.display = '';
-    const hashMissingEl = document.getElementById('vMobileHashMissing');
-    hashMissingEl.style.display = gMobileHash ? 'none' : 'block';
-    if (gMobileHash) {
-      document.getElementById('mHashDisp').textContent =
-        'Stored hash: ' + gMobileHash.slice(0,16) + '…';
-    } else {
-      document.getElementById('mHashDisp').textContent = '';
-    }
-    document.getElementById('mVerRes').className = 'vresult';
-    document.getElementById('mobileIn').value = '';
-    document.getElementById('mVerBtn').disabled = false;
-    document.getElementById('mVerBtn').textContent = 'Verify';
-  } else {
-    vMob.style.display = 'none';
-  }
-
-  if (emailP) {
-    vEm.style.display = '';
-    const hashMissingEl = document.getElementById('vEmailHashMissing');
-    hashMissingEl.style.display = gEmailHash ? 'none' : 'block';
-    if (gEmailHash) {
-      document.getElementById('eHashDisp').textContent =
-        'Stored hash: ' + gEmailHash.slice(0,16) + '…';
-    } else {
-      document.getElementById('eHashDisp').textContent = '';
-    }
-    document.getElementById('eVerRes').className = 'vresult';
-    document.getElementById('emailIn').value = '';
-    document.getElementById('eVerBtn').disabled = false;
-    document.getElementById('eVerBtn').textContent = 'Verify';
-  } else {
-    vEm.style.display = 'none';
-  }
-
+  // Stored hashes panel
   const hs = document.getElementById('hashSec');
   if (gMobileHash || gEmailHash) {
     hs.style.display = '';
@@ -1127,6 +1074,103 @@ function render(f, rawDisp, fmt) {
   window.scrollTo({top: 0, behavior: 'smooth'});
 }
 
+// ── Render the contact details section automatically ──────────
+function renderContactSection(f) {
+  const sec       = document.getElementById('contactSec');
+  const mobileVal = document.getElementById('cMobileVal');
+  const mobileBdg = document.getElementById('cMobileBadge');
+  const emailVal  = document.getElementById('cEmailVal');
+  const emailBdg  = document.getElementById('cEmailBadge');
+
+  // Determine what we have
+  const hasActualMobile = !!(f.mobileActual && f.mobileActual.trim());
+  const hasActualEmail  = !!(f.emailActual  && f.emailActual.trim());
+  const mobileLinked    = f.mobileP || gIndicator === 2 || gIndicator === 3;
+  const emailLinked     = f.emailP  || gIndicator === 1 || gIndicator === 3;
+  const hasMobileHash   = !!gMobileHash;
+  const hasEmailHash    = !!gEmailHash;
+
+  // Always show section if there is any contact info at all
+  const showSection = hasActualMobile || hasActualEmail || mobileLinked || emailLinked;
+  sec.style.display = showSection ? '' : 'none';
+
+  // ── Mobile ────────────────────────────────────────────────
+  if (hasActualMobile) {
+    // Old XML: actual number is present — show it masked for privacy
+    const num = f.mobileActual.trim();
+    const masked = num.length >= 10
+      ? '✱✱✱✱✱✱' + num.slice(-4)
+      : num; // if shorter, show as-is
+    mobileVal.textContent = masked;
+    mobileVal.className   = 'contact-val masked';
+    mobileBdg.innerHTML   =
+      `<span class="contact-badge badge-actual">✓ Registered • ✱✱✱✱✱✱${num.slice(-4)}</span>`;
+  } else if (mobileLinked) {
+    // Secure QR: hash stored — linked but number not available
+    mobileVal.textContent = 'Number not stored in QR';
+    mobileVal.className   = 'contact-val na';
+    mobileBdg.innerHTML   = hasMobileHash
+      ? `<span class="contact-badge badge-linked">✓ Linked — hash stored</span>`
+      : `<span class="contact-badge badge-linked">✓ Linked (per indicator)</span>`;
+  } else {
+    mobileVal.textContent = 'Not linked to this Aadhaar';
+    mobileVal.className   = 'contact-val na';
+    mobileBdg.innerHTML   = `<span class="contact-badge badge-notlinked">✗ Not linked</span>`;
+  }
+
+  // ── Email ─────────────────────────────────────────────────
+  if (hasActualEmail) {
+    const em     = f.emailActual.trim();
+    const atIdx  = em.indexOf('@');
+    let masked   = em;
+    if (atIdx > 2) {
+      // mask middle of local part: keep first 2 chars + *** + last char before @
+      masked = em.slice(0,2) + '***' + em.slice(atIdx - 1);
+    }
+    emailVal.textContent = masked;
+    emailVal.className   = 'contact-val masked';
+    emailBdg.innerHTML   =
+      `<span class="contact-badge badge-actual">✓ Registered • ${masked}</span>`;
+  } else if (emailLinked) {
+    emailVal.textContent = 'Email not stored in QR';
+    emailVal.className   = 'contact-val na';
+    emailBdg.innerHTML   = hasEmailHash
+      ? `<span class="contact-badge badge-linked">✓ Linked — hash stored</span>`
+      : `<span class="contact-badge badge-linked">✓ Linked (per indicator)</span>`;
+  } else {
+    emailVal.textContent = 'Not linked to this Aadhaar';
+    emailVal.className   = 'contact-val na';
+    emailBdg.innerHTML   = `<span class="contact-badge badge-notlinked">✗ Not linked</span>`;
+  }
+}
+
+// ── Render advanced verify section (hash checking) ────────────
+function renderAdvancedVerify(f) {
+  const advWrap     = document.getElementById('advWrap');
+  const mobWrap     = document.getElementById('advMobileWrap');
+  const emWrap      = document.getElementById('advEmailWrap');
+  const hasMobHash  = !!gMobileHash;
+  const hasEmHash   = !!gEmailHash;
+
+  // Show advanced panel only if there are hashes to verify
+  if (hasMobHash || hasEmHash) {
+    advWrap.style.display = '';
+    mobWrap.style.display = hasMobHash ? '' : 'none';
+    emWrap.style.display  = hasEmHash  ? '' : 'none';
+    // Reset inputs
+    document.getElementById('mVerRes').className = 'vresult';
+    document.getElementById('eVerRes').className = 'vresult';
+    document.getElementById('mobileIn').value = '';
+    document.getElementById('emailIn').value  = '';
+    document.getElementById('mVerBtn').disabled = false;
+    document.getElementById('mVerBtn').textContent = 'Verify';
+    document.getElementById('eVerBtn').disabled = false;
+    document.getElementById('eVerBtn').textContent = 'Verify';
+  } else {
+    advWrap.style.display = 'none';
+  }
+}
+
 // ═════════════════════════════════════════════════════════════
 //  JPEG2000 PHOTO DISPLAY
 // ═════════════════════════════════════════════════════════════
@@ -1149,31 +1193,26 @@ function displayPhoto(photoBytes) {
   const isJPEG = m0 === 0xFF && m1 === 0xD8;
   const isJPC  = m0 === 0xFF && m1 === 0x4F;
   const isJP2  = m0 === 0x00 && m1 === 0x00 && m2 === 0x00 && m3 === 0x0C;
-
-  dbg('inf', `Photo magic: ${h8(photoBytes, 4)} (${isJPEG ? 'JPEG' : isJPC ? 'JPC' : isJP2 ? 'JP2' : 'unknown'})`);
+  dbg('inf', `Photo: ${isJPEG ? 'JPEG' : isJPC ? 'JPC' : isJP2 ? 'JP2' : 'unknown'}`);
 
   if (isJPEG) {
-    const blob = new Blob([photoBytes], {type: 'image/jpeg'});
-    const url  = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([photoBytes], {type:'image/jpeg'}));
     pi.src = url;
-    pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ JPEG'; };
-    pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML = '<span>👤</span><span>Photo error</span>'; };
+    pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ JPEG'; };
+    pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML='<span>👤</span><span>Photo error</span>'; };
     return;
   }
-
   if (isJPC || isJP2) {
-    const blob = new Blob([photoBytes], {type: 'image/jp2'});
-    const url  = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([photoBytes], {type:'image/jp2'}));
     pi.src = url;
-    pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ JP2'; dbg('ok', 'Photo: native jp2 render (Safari)'); };
+    pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ JP2'; };
     pi.onerror = async () => {
       URL.revokeObjectURL(url);
-      dbg('warn', 'Native jp2 failed — trying pdfjs');
       const dataUrl = await decodeJP2viaPDFjs(photoBytes);
       if (dataUrl) {
         pi.src = dataUrl;
-        pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ JP2 decoded'; };
-        pi.onerror = () => { ph.innerHTML = '<span>👤</span><span>Decode failed</span>'; decBtn.style.display = 'block'; };
+        pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ JP2 decoded'; };
+        pi.onerror = () => { ph.innerHTML='<span>👤</span><span>Decode failed</span>'; decBtn.style.display='block'; };
       } else {
         ph.innerHTML = '<span>📷</span><span>Tap Decode</span>';
         decBtn.style.display = 'block';
@@ -1181,12 +1220,10 @@ function displayPhoto(photoBytes) {
     };
     return;
   }
-
-  const blob = new Blob([photoBytes], {type: 'image/jpeg'});
-  const url  = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(new Blob([photoBytes], {type:'image/jpeg'}));
   pi.src = url;
-  pi.onload = () => { ph.style.display = 'none'; pi.style.display = 'block'; badge.style.display = 'block'; badge.textContent = '✓ Photo'; };
-  pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML = '<span>👤</span><span>Tap Decode</span>'; decBtn.style.display = 'block'; };
+  pi.onload = () => { ph.style.display='none'; pi.style.display='block'; badge.style.display='block'; badge.textContent='✓ Photo'; };
+  pi.onerror = () => { URL.revokeObjectURL(url); ph.innerHTML='<span>👤</span><span>Tap Decode</span>'; decBtn.style.display='block'; };
 }
 
 async function decodePhoto() {
@@ -1202,13 +1239,13 @@ async function decodePhoto() {
     document.getElementById('phBadge').textContent = '✓ Decoded';
     btn.style.display = 'none';
   } else {
-    const blob = new Blob([gPhotoBytes], {type: 'image/jp2'});
+    const blob = new Blob([gPhotoBytes], {type:'image/jp2'});
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url; a.download = 'aadhaar_photo.jp2'; a.click();
     URL.revokeObjectURL(url);
     btn.textContent = '📥 Download JP2'; btn.disabled = false;
-    ph.innerHTML = '<span>📷</span><span>Open in Safari or Photos app</span>';
+    ph.innerHTML = '<span>📷</span><span>Open in Safari/Photos</span>';
   }
 }
 
@@ -1217,24 +1254,15 @@ async function decodeJP2viaPDFjs(jp2Bytes) {
   try {
     const dim = getJP2Dim(jp2Bytes);
     const W = dim ? dim.w : 200, H = dim ? dim.h : 200;
-    dbg('inf', `JP2 dims: ${W}×${H}`);
     const pdfBytes = buildMinimalPDF(jp2Bytes, W, H);
-    dbg('inf', `Mini PDF: ${pdfBytes.length}B`);
-    const loadTask = pdfjsLib.getDocument({data: pdfBytes, verbosity: 0});
-    const pdf  = await loadTask.promise;
+    const pdf  = await pdfjsLib.getDocument({data: pdfBytes, verbosity: 0}).promise;
     const page = await pdf.getPage(1);
     const vp   = page.getViewport({scale: 1});
     const cnv  = document.createElement('canvas');
-    cnv.width  = Math.round(vp.width);
-    cnv.height = Math.round(vp.height);
-    const cx   = cnv.getContext('2d');
-    await page.render({canvasContext: cx, viewport: vp}).promise;
-    dbg('ok', `pdfjs JP2 decoded: ${cnv.width}×${cnv.height}`);
+    cnv.width  = Math.round(vp.width); cnv.height = Math.round(vp.height);
+    await page.render({canvasContext: cnv.getContext('2d'), viewport: vp}).promise;
     return cnv.toDataURL('image/png');
-  } catch(e) {
-    dbg('err', 'pdfjs decode: ' + e.message);
-    return null;
-  }
+  } catch(e) { dbg('err', 'pdfjs: ' + e.message); return null; }
 }
 
 function getJP2Dim(b) {
@@ -1258,23 +1286,22 @@ function getJP2Dim(b) {
 function buildMinimalPDF(imgBytes, W, H) {
   const E = new TextEncoder();
   const parts = []; const offsets = new Array(7).fill(0); let pos = 0;
-  const add    = (bytes) => { parts.push(bytes); pos += bytes.length; };
-  const addStr = (s)     => add(E.encode(s));
+  const add    = b => { parts.push(b); pos += b.length; };
+  const addStr = s => add(E.encode(s));
   addStr('%PDF-1.4\n');
   offsets[1]=pos; addStr(`1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n`);
   offsets[2]=pos; addStr(`2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n`);
   offsets[3]=pos; addStr(`3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${W} ${H}]/Resources<</XObject<</Im0 4 0 R>>>>/Contents 5 0 R>>\nendobj\n`);
   offsets[4]=pos;
   const imgHdr = E.encode(`4 0 obj\n<</Type/XObject/Subtype/Image/Width ${W}/Height ${H}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/JPXDecode/Length ${imgBytes.length}>>\nstream\n`);
-  const imgFtr = E.encode('\nendstream\nendobj\n');
-  add(imgHdr); add(imgBytes); add(imgFtr);
+  add(imgHdr); add(imgBytes); add(E.encode('\nendstream\nendobj\n'));
   const content = `q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`;
   offsets[5]=pos; addStr(`5 0 obj\n<</Length ${content.length}>>\nstream\n${content}\nendstream\nendobj\n`);
   const xrefPos = pos;
   let xref = 'xref\n0 6\n0000000000 65535 f \n';
   for (let i=1; i<=5; i++) xref += offsets[i].toString().padStart(10,'0')+' 00000 n \n';
   addStr(xref+`trailer\n<</Root 1 0 R/Size 6>>\nstartxref\n${xrefPos}\n%%EOF\n`);
-  const total  = parts.reduce((s, p) => s + p.length, 0);
+  const total = parts.reduce((s,p) => s+p.length, 0);
   const result = new Uint8Array(total); let off = 0;
   for (const p of parts) { result.set(p, off); off += p.length; }
   return result;
@@ -1286,102 +1313,57 @@ function openPhotoModal() {
   document.getElementById('modalImg').src = pi.src;
   document.getElementById('photoModal').classList.add('show');
 }
-function closeModal() {
-  document.getElementById('photoModal').classList.remove('show');
-}
+function closeModal() { document.getElementById('photoModal').classList.remove('show'); }
 
 // ═════════════════════════════════════════════════════════════
-//  MOBILE / EMAIL HASH VERIFICATION — IMPROVEMENT #2
-//
-//  The UIDAI Aadhaar Secure QR stores a SHA-256 hash of the
-//  mobile/email. N = last digit of full Aadhaar UID (last digit
-//  of refId first 4 chars). Different UIDAI QR generator
-//  versions use different strategies:
-//
-//  Strategy A (standard):  SHA256^N(input_as_utf8_bytes)
-//  Strategy B (hex-chain): SHA256^N but each round hashes the
-//                          hex string of previous digest
-//  Strategy C (91-prefix): Same as A/B but prepend "91" to mobile
-//
-//  We try all combinations exhaustively (7 strategies × 9 iters
-//  = 63 attempts) to guarantee compatibility across all versions.
+//  HASH VERIFICATION (Advanced collapsible panel)
 // ═════════════════════════════════════════════════════════════
-
 async function verifyMobile() {
   const inp    = document.getElementById('mobileIn');
   const res    = document.getElementById('mVerRes');
   const btn    = document.getElementById('mVerBtn');
-  const mobile = inp.value.trim().replace(/\D/g, '');
+  const mobile = inp.value.trim().replace(/\D/g,'');
 
   if (!/^\d{10}$/.test(mobile)) {
     inp.classList.add('error');
     showVRes(res, '❌ Enter a valid 10-digit mobile number', false); return;
   }
   inp.classList.remove('error');
-
   if (!gMobileHash) {
-    // No hash — try anyway but warn
-    showVRes(res,
-      'ℹ️ No mobile hash was extracted from this QR.\n' +
-      'This may be an older QR version that does not store the hash, ' +
-      'or the hash position could not be determined.\n' +
-      'Verification is not possible without the stored hash.',
-      null);
-    return;
+    showVRes(res, 'ℹ️ No hash found in QR — cannot verify.', null); return;
   }
 
   btn.disabled = true; btn.textContent = 'Verifying…';
-
-  // Determine N from last digit of Aadhaar (refId[3])
-  const lastDigit = gRefId ? (parseInt(gRefId.charAt(3), 10) || 1) : 1;
+  const lastDigit = gRefId ? (parseInt(gRefId.charAt(3),10) || 1) : 1;
   const specIter  = lastDigit < 1 ? 1 : lastDigit;
-
-  dbg('inf', `Mobile verify: mobile=${mobile} refId="${gRefId}" specIter=${specIter} hash=${gMobileHash.slice(0,16)}…`);
-
-  // Build iteration order: spec iteration first, then rest
-  const toTry = [specIter];
-  for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
+  const toTry     = [specIter, ...[1,2,3,4,5,6,7,8,9].filter(i => i !== specIter)];
 
   const strategies = [
-    { id: 'A', label: 'SHA256^N(mobile) raw-bytes',       fn: n => sha256nRaw(mobile, n)         },
-    { id: 'B', label: 'SHA256^N(mobile) hex-string-chain', fn: n => sha256nHex(mobile, n)         },
-    { id: 'C', label: 'SHA256^N("91"+mobile) raw-bytes',   fn: n => sha256nRaw('91' + mobile, n)  },
-    { id: 'D', label: 'SHA256^N("91"+mobile) hex-chain',   fn: n => sha256nHex('91' + mobile, n)  },
-    { id: 'E', label: 'SHA256^N("+91"+mobile) raw-bytes',  fn: n => sha256nRaw('+91' + mobile, n) },
-    { id: 'F', label: 'SHA256(last4+mobile) single',       fn: _ => sha256nRaw(gUidLast4 + mobile, 1)},
-    { id: 'G', label: 'SHA256^N(last4+mobile) raw',        fn: n => sha256nRaw(gUidLast4 + mobile, n)},
+    {id:'A', fn: n => sha256nRaw(mobile, n)},
+    {id:'B', fn: n => sha256nHex(mobile, n)},
+    {id:'C', fn: n => sha256nRaw('91'+mobile, n)},
+    {id:'D', fn: n => sha256nHex('91'+mobile, n)},
+    {id:'E', fn: n => sha256nRaw('+91'+mobile, n)},
+    {id:'F', fn: _ => sha256nRaw(gUidLast4+mobile, 1)},
+    {id:'G', fn: n => sha256nRaw(gUidLast4+mobile, n)},
   ];
 
   try {
     for (const n of toTry) {
-      for (const strat of strategies) {
-        const computed = await strat.fn(n);
-        const match    = computed.toLowerCase() === gMobileHash.toLowerCase();
-        dbg(match ? 'ok' : 'inf',
-          `[${strat.id}] iter=${n}: ${computed.slice(0,16)}… ${match ? '✅ MATCH' : '✗'}`);
-        if (match) {
+      for (const s of strategies) {
+        const h = await s.fn(n);
+        if (h.toLowerCase() === gMobileHash.toLowerCase()) {
           showVRes(res,
-            `✅ Mobile number verified!\n` +
-            `Strategy: ${strat.label}\n` +
-            `Iterations: ${n}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
+            `✅ Mobile verified!\nStrategy ${s.id} · ${n} SHA-256 iteration${n>1?'s':''}`,
             true);
           btn.disabled = false; btn.textContent = 'Verify'; return;
         }
       }
     }
-
-    // All failed — show diagnostic
-    const specHash = await sha256nRaw(mobile, specIter);
     showVRes(res,
-      `❌ Mobile number does not match.\n` +
-      `Tried ${toTry.length} iteration counts × ${strategies.length} strategies = ${toTry.length * strategies.length} attempts.\n` +
-      `Spec (iter ${specIter}): ${specHash.slice(0,20)}…\n` +
-      `Stored:          ${gMobileHash.slice(0,20)}…\n\n` +
-      `Please ensure you are entering the mobile number registered with UIDAI.`,
-      false);
-  } catch(e) {
-    showVRes(res, '❌ Verification error: ' + e.message, false);
-  }
+      `❌ No match after ${toTry.length * strategies.length} attempts.\n` +
+      `Enter the exact mobile number registered with UIDAI.`, false);
+  } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
   btn.disabled = false; btn.textContent = 'Verify';
 }
 
@@ -1391,115 +1373,72 @@ async function verifyEmail() {
   const btn   = document.getElementById('eVerBtn');
   const email = inp.value.trim();
 
-  if (!email || !email.includes('@') || !email.includes('.')) {
+  if (!email || !email.includes('@')) {
     inp.classList.add('error');
     showVRes(res, '❌ Enter a valid email address', false); return;
   }
   inp.classList.remove('error');
-
   if (!gEmailHash) {
-    showVRes(res,
-      'ℹ️ No email hash was extracted from this QR.\n' +
-      'This may be an older QR version, or the hash position could not be determined.\n' +
-      'Verification is not possible without the stored hash.',
-      null);
-    return;
+    showVRes(res, 'ℹ️ No hash found in QR — cannot verify.', null); return;
   }
 
   btn.disabled = true; btn.textContent = 'Verifying…';
-
-  const lastDigit = gRefId ? (parseInt(gRefId.charAt(3), 10) || 1) : 1;
+  const lastDigit = gRefId ? (parseInt(gRefId.charAt(3),10) || 1) : 1;
   const specIter  = lastDigit < 1 ? 1 : lastDigit;
-
-  dbg('inf', `Email verify: email=${email} specIter=${specIter} hash=${gEmailHash.slice(0,16)}…`);
-
-  const toTry = [specIter];
-  for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
-
-  // Email strategies — also try lowercase/uppercase variants
-  const emailLc = email.toLowerCase();
-  const emailUc = email.toUpperCase();
+  const toTry     = [specIter, ...[1,2,3,4,5,6,7,8,9].filter(i => i !== specIter)];
+  const lc = email.toLowerCase(), uc = email.toUpperCase();
 
   const strategies = [
-    { id: 'A', label: 'SHA256^N(email) raw-bytes',            fn: n => sha256nRaw(emailLc, n)  },
-    { id: 'B', label: 'SHA256^N(email) hex-string-chain',     fn: n => sha256nHex(emailLc, n)  },
-    { id: 'C', label: 'SHA256^N(email original case) raw',    fn: n => sha256nRaw(email, n)     },
-    { id: 'D', label: 'SHA256^N(email original case) hex',    fn: n => sha256nHex(email, n)     },
-    { id: 'E', label: 'SHA256^N(email uppercase) raw',        fn: n => sha256nRaw(emailUc, n)   },
-    { id: 'F', label: 'SHA256(last4+email) single',           fn: _ => sha256nRaw(gUidLast4 + emailLc, 1)},
-    { id: 'G', label: 'SHA256^N(last4+email) raw',            fn: n => sha256nRaw(gUidLast4 + emailLc, n)},
+    {id:'A', fn: n => sha256nRaw(lc, n)},
+    {id:'B', fn: n => sha256nHex(lc, n)},
+    {id:'C', fn: n => sha256nRaw(email, n)},
+    {id:'D', fn: n => sha256nHex(email, n)},
+    {id:'E', fn: n => sha256nRaw(uc, n)},
+    {id:'F', fn: _ => sha256nRaw(gUidLast4+lc, 1)},
+    {id:'G', fn: n => sha256nRaw(gUidLast4+lc, n)},
   ];
 
   try {
     for (const n of toTry) {
-      for (const strat of strategies) {
-        const computed = await strat.fn(n);
-        const match    = computed.toLowerCase() === gEmailHash.toLowerCase();
-        dbg(match ? 'ok' : 'inf',
-          `[${strat.id}] iter=${n}: ${computed.slice(0,16)}… ${match ? '✅ MATCH' : '✗'}`);
-        if (match) {
+      for (const s of strategies) {
+        const h = await s.fn(n);
+        if (h.toLowerCase() === gEmailHash.toLowerCase()) {
           showVRes(res,
-            `✅ Email address verified!\n` +
-            `Strategy: ${strat.label}\n` +
-            `Iterations: ${n}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
+            `✅ Email verified!\nStrategy ${s.id} · ${n} SHA-256 iteration${n>1?'s':''}`,
             true);
           btn.disabled = false; btn.textContent = 'Verify'; return;
         }
       }
     }
-
-    const specHash = await sha256nRaw(emailLc, specIter);
     showVRes(res,
-      `❌ Email address does not match.\n` +
-      `Tried ${toTry.length} iteration counts × ${strategies.length} strategies = ${toTry.length * strategies.length} attempts.\n` +
-      `Spec (iter ${specIter}): ${specHash.slice(0,20)}…\n` +
-      `Stored:          ${gEmailHash.slice(0,20)}…\n\n` +
-      `Please ensure you enter the email registered with UIDAI.`,
-      false);
-  } catch(e) {
-    showVRes(res, '❌ Error: ' + e.message, false);
-  }
+      `❌ No match after ${toTry.length * strategies.length} attempts.\n` +
+      `Enter the exact email registered with UIDAI.`, false);
+  } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
   btn.disabled = false; btn.textContent = 'Verify';
 }
 
-// ── Strategy A: SHA256^N chaining raw bytes ───────────────────
-// Each round hashes the raw bytes of the previous digest
 async function sha256nRaw(input, n) {
   let data = new TextEncoder().encode(input);
   for (let i = 0; i < n; i++) {
     const buf = await crypto.subtle.digest('SHA-256', data);
     data = new Uint8Array(buf);
   }
-  return Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(data).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-// ── Strategy B: SHA256^N chaining hex string of each digest ───
-// Some UIDAI generators hash the hex string representation
-// of each intermediate digest, not the raw bytes
 async function sha256nHex(input, n) {
   let data = new TextEncoder().encode(input);
   for (let i = 0; i < n; i++) {
-    const buf  = await crypto.subtle.digest('SHA-256', data);
-    const hex  = Array.from(new Uint8Array(buf))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
-    // For all rounds except the last, encode hex as UTF-8 for next round
-    if (i < n - 1) {
-      data = new TextEncoder().encode(hex);
-    } else {
-      // Return the final hex
-      return hex;
-    }
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    data = i < n - 1 ? new TextEncoder().encode(hex) : new Uint8Array(buf);
   }
-  // n=1 case
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  return Array.from(data).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
 function showVRes(el, msg, ok) {
   el.textContent = msg;
-  if (ok === true)  el.className = 'vresult show ok';
-  else if (ok === false) el.className = 'vresult show fail';
-  else el.className = 'vresult show info';
+  el.className = 'vresult show ' + (ok === true ? 'ok' : ok === false ? 'fail' : 'info');
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -1518,30 +1457,25 @@ function esc(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function dbg(t, m) { dbgLines.push({t, m}); }
-function doFlash() {
-  fl.classList.add('on');
-  setTimeout(() => fl.classList.remove('on'), 500);
-}
+function doFlash() { fl.classList.add('on'); setTimeout(() => fl.classList.remove('on'), 500); }
 
 function buildSegDisplay(ss, tag, total) {
   const names = ['indicator','referenceId','name','dob','gender','careOf','district',
     'landmark','house','location','pinCode','postOffice','state','street','subDistrict','VTC'];
   const lines = [`<span class="xc">// ${tag} | ${total}B | ${ss.length} segs</span>`, ``];
   ss.slice(0, 16).forEach((v, i) => lines.push(
-    `<span class="xa">[${i}] ${names[i] || '?'}</span> = ` +
-    `<span class="xv">"${esc(v.replace(/[\x00-\x1f\x7f]/g, '·').slice(0, 80))}"</span>`
+    `<span class="xa">[${i}] ${names[i]||'?'}</span> = ` +
+    `<span class="xv">"${esc(v.replace(/[\x00-\x1f\x7f]/g,'·').slice(0,80))}"</span>`
   ));
   return lines.join('\n');
 }
 
-// ─── Camera helpers ──────────────────────────────────────────
 async function toggleFlash() {
   if (!vTrack) { showInf('Start camera first.'); return; }
   const caps = vTrack.getCapabilities ? vTrack.getCapabilities() : {};
   if (!caps.torch) { showInf('Flash not supported on this device.'); return; }
   flashOn = !flashOn;
-  await vTrack.applyConstraints({advanced: [{torch: flashOn}]})
-    .catch(() => { flashOn = !flashOn; });
+  await vTrack.applyConstraints({advanced: [{torch: flashOn}]}).catch(() => { flashOn = !flashOn; });
   document.getElementById('btnFlash').classList.toggle('on', flashOn);
   document.getElementById('flashLbl').textContent = flashOn ? 'Flash ON' : 'Flash';
 }
@@ -1552,23 +1486,16 @@ async function toggleFocus() {
   if (vTrack) {
     const c = vTrack.getCapabilities ? vTrack.getCapabilities() : {};
     if (c.focusMode)
-      await vTrack.applyConstraints({advanced: [{focusMode: afOn ? 'continuous' : 'manual'}]})
-        .catch(() => {});
+      await vTrack.applyConstraints({advanced: [{focusMode: afOn ? 'continuous' : 'manual'}]}).catch(()=>{});
   }
 }
 
 function stopCam(resetUI) {
-  scanning  = false;
-  detecting = false;
-  cancelAnimationFrame(rafId);
+  scanning = false; detecting = false; cancelAnimationFrame(rafId);
   imageCapture = null;
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; vTrack = null; }
-  video.srcObject = null;
-  barcodeDetector = null;
-  if (resetUI) {
-    setBtnState('idle');
-    cst.textContent = 'Camera stopped.';
-  }
+  video.srcObject = null; barcodeDetector = null;
+  if (resetUI) { setBtnState('idle'); cst.textContent = 'Camera stopped.'; }
 }
 
 function resetAll() {
@@ -1576,16 +1503,17 @@ function resetAll() {
   document.getElementById('scanCard').style.display = 'block';
   setBtnState('idle');
   cst.textContent = 'Tap Start Camera or upload an image below';
-  rawOpen = false; dbgOpen = false;
+  rawOpen = false; dbgOpen = false; advOpen = false;
   document.getElementById('rawP').classList.remove('show');
   document.getElementById('dbgP').classList.remove('show');
   document.getElementById('rawArr').textContent = '▼';
   document.getElementById('dbgArr').textContent = '▼';
+  document.getElementById('advBody').classList.remove('open');
+  document.getElementById('advArr').textContent = '▼';
   const pi = document.getElementById('aPhoto');
   if (pi.src && pi.src.startsWith('blob:')) URL.revokeObjectURL(pi.src);
-  pi.src = '';
+  pi.src = ''; pi.style.display = 'none';
   document.getElementById('phPh').style.display = 'flex';
-  pi.style.display = 'none';
   document.getElementById('phBadge').style.display = 'none';
   document.getElementById('phDecBtn').style.display = 'none';
   hideProg(); hideMsg();
@@ -1602,6 +1530,11 @@ function togRaw() {
   rawOpen = !rawOpen;
   document.getElementById('rawP').classList.toggle('show', rawOpen);
   document.getElementById('rawArr').textContent = rawOpen ? '▲' : '▼';
+}
+function togAdv() {
+  advOpen = !advOpen;
+  document.getElementById('advBody').classList.toggle('open', advOpen);
+  document.getElementById('advArr').textContent = advOpen ? '▲' : '▼';
 }
 
 function setBtnLd(on) {
@@ -1623,64 +1556,43 @@ function showProg(f) {
   const u  = URL.createObjectURL(f);
   pi.src = u; pi.onload = () => URL.revokeObjectURL(u);
   document.getElementById('pName').textContent = f.name;
-  document.getElementById('pDim').textContent  = Math.round(f.size / 1024) + 'KB';
+  document.getElementById('pDim').textContent  = Math.round(f.size/1024) + 'KB';
   document.getElementById('pFill').style.width = '0%';
   document.getElementById('pLab').textContent  = 'Preparing…';
   document.getElementById('pChips').innerHTML  = '';
   b.classList.add('show'); hideMsg();
 }
 function hideProg() { document.getElementById('progBox').classList.remove('show'); }
-
-function showErr(m)  { _msg('mErr', 'eTxt', m); }
-function showInf(m)  { _msg('mInf', 'iTxt', m); }
-function showWarn(m) { _msg('mWarn', 'wTxt', m); }
+function showErr(m)  { _msg('mErr','eTxt',m); }
+function showInf(m)  { _msg('mInf','iTxt',m); }
+function showWarn(m) { _msg('mWarn','wTxt',m); }
 function _msg(mid, tid, m) {
-  ['mErr','mInf','mWarn'].forEach(id =>
-    document.getElementById(id).classList.remove('show'));
+  ['mErr','mInf','mWarn'].forEach(id => document.getElementById(id).classList.remove('show'));
   document.getElementById(tid).textContent = m;
   document.getElementById(mid).classList.add('show');
 }
 function hideMsg() {
-  ['mErr','mInf','mWarn'].forEach(id =>
-    document.getElementById(id).classList.remove('show'));
+  ['mErr','mInf','mWarn'].forEach(id => document.getElementById(id).classList.remove('show'));
 }
 
 // ═════════════════════════════════════════════════════════════
-//  DRAG & DROP via addEventListener (NOT inline attributes)
+//  DRAG & DROP
 // ═════════════════════════════════════════════════════════════
 (function initDropZone() {
   const dropZ = document.getElementById('dropZ');
   const fi    = document.getElementById('fi');
-
-  dropZ.addEventListener('click', () => fi.click());
-
-  dropZ.addEventListener('dragenter', e => {
-    e.preventDefault();
-    dropZ.classList.add('drag');
-  });
-
-  dropZ.addEventListener('dragover', e => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    dropZ.classList.add('drag');
-  });
-
-  dropZ.addEventListener('dragleave', e => {
-    if (dropZ.contains(e.relatedTarget)) return;
-    dropZ.classList.remove('drag');
-  });
-
+  dropZ.addEventListener('click',     () => fi.click());
+  dropZ.addEventListener('dragenter', e => { e.preventDefault(); dropZ.classList.add('drag'); });
+  dropZ.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect='copy'; dropZ.classList.add('drag'); });
+  dropZ.addEventListener('dragleave', e => { if (dropZ.contains(e.relatedTarget)) return; dropZ.classList.remove('drag'); });
   dropZ.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZ.classList.remove('drag');
+    e.preventDefault(); dropZ.classList.remove('drag');
     const f = e.dataTransfer.files[0];
     if (f && f.type.startsWith('image/')) processFile(f);
     else if (f) showErr('Please drop an image file.');
   });
-
-  // Prevent browser from navigating if user drops outside the zone
-  window.addEventListener('dragover',  e => e.preventDefault());
-  window.addEventListener('drop',      e => e.preventDefault());
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop',     e => e.preventDefault());
 })();
 </script>
 </body>
