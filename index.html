@@ -419,10 +419,20 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
         <div class="vsec-inner" id="advMobileWrap" style="display:none">
           <div class="vsec-label">📱 Enter mobile to verify hash</div>
           <div class="vinput-row">
-            <input class="vinput" id="mobileIn" type="tel" maxlength="10"
-              placeholder="10-digit mobile" inputmode="numeric"/>
-            <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
-          </div>
+  <input class="vinput" id="mobileIn" type="tel" maxlength="10"
+    placeholder="10-digit mobile" inputmode="numeric"/>
+
+  <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">
+    Verify
+  </button>
+
+  <button class="vbtn"
+    id="mAttachBtn"
+    onclick="attachMobile()"
+    style="background:#7c3aed;min-width:78px">
+    Attach
+  </button>
+</div>
           <div class="vresult" id="mVerRes"></div>
         </div>
         <div class="vsec-inner" id="advEmailWrap" style="display:none">
@@ -1365,6 +1375,133 @@ async function verifyMobile() {
       `Enter the exact mobile number registered with UIDAI.`, false);
   } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
   btn.disabled = false; btn.textContent = 'Verify';
+}
+// ═════════════════════════════════════════════════════════════
+//  ATTACH MOBILE (Verify + Auto-fill Contact Section)
+// ═════════════════════════════════════════════════════════════
+async function attachMobile() {
+  const inp = document.getElementById('mobileIn');
+  const res = document.getElementById('mVerRes');
+  const btn = document.getElementById('mAttachBtn');
+
+  const mobile = inp.value.trim().replace(/\D/g,'');
+
+  // Validation
+  if (!/^[6-9]\d{9}$/.test(mobile)) {
+    inp.classList.add('error');
+    showVRes(
+      res,
+      '❌ Enter valid 10-digit Indian mobile number',
+      false
+    );
+    return;
+  }
+
+  inp.classList.remove('error');
+
+  if (!gMobileHash) {
+    showVRes(
+      res,
+      'ℹ️ No mobile hash found in QR — cannot attach.',
+      null
+    );
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Attaching…';
+
+  // Existing optimized UIDAI logic
+  const lastDigit = gRefId
+    ? (parseInt(gRefId.charAt(3),10) || 1)
+    : 1;
+
+  const specIter = lastDigit < 1 ? 1 : lastDigit;
+
+  const toTry = [
+    specIter,
+    ...[1,2,3,4,5,6,7,8,9]
+      .filter(i => i !== specIter)
+  ];
+
+  const strategies = [
+    {id:'A', fn:n => sha256nRaw(mobile,n)},
+    {id:'B', fn:n => sha256nHex(mobile,n)},
+    {id:'C', fn:n => sha256nRaw('91'+mobile,n)},
+    {id:'D', fn:n => sha256nHex('91'+mobile,n)},
+    {id:'E', fn:n => sha256nRaw('+91'+mobile,n)},
+    {id:'F', fn:_ => sha256nRaw(gUidLast4+mobile,1)},
+    {id:'G', fn:n => sha256nRaw(gUidLast4+mobile,n)},
+  ];
+
+  try {
+    // Chunked processing → no UI freeze
+    for (const n of toTry) {
+      for (const s of strategies) {
+
+        await new Promise(r => setTimeout(r, 0));
+
+        const h = await s.fn(n);
+
+        // EARLY STOP ON MATCH
+        if (h.toLowerCase() === gMobileHash.toLowerCase()) {
+
+          // Update contact section
+          const mobileVal =
+            document.getElementById('cMobileVal');
+
+          const mobileBadge =
+            document.getElementById('cMobileBadge');
+
+          const masked =
+            mobile.slice(0,2) +
+            '******' +
+            mobile.slice(-2);
+
+          mobileVal.textContent = mobile;
+          mobileVal.className =
+            'contact-val masked';
+
+          mobileBadge.innerHTML = `
+            <span class="contact-badge badge-actual">
+              ✓ Attached & Verified • ${masked}
+            </span>
+          `;
+
+          // Success UI
+          showVRes(
+            res,
+            `✅ Mobile attached successfully!
+Strategy ${s.id} · ${n} SHA-256 iteration${n>1?'s':''}`,
+            true
+          );
+
+          btn.disabled = false;
+          btn.textContent = 'Attach';
+
+          return;
+        }
+      }
+    }
+
+    showVRes(
+      res,
+      '❌ Mobile hash mismatch. Enter exact UIDAI-linked mobile number.',
+      false
+    );
+
+  } catch(e) {
+
+    showVRes(
+      res,
+      '❌ Error: ' + e.message,
+      false
+    );
+
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Attach';
+  }
 }
 
 async function verifyEmail() {
