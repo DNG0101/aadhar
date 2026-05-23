@@ -421,15 +421,28 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
           <div class="vinput-row">
             <input class="vinput" id="mobileIn" type="tel" maxlength="10"
               placeholder="10-digit mobile" inputmode="numeric"/>
-            <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
+            <button class="vbtn"
+id="mVerBtn"
+onclick="verifyMobile()">
+Verify
+</button>
+
+<button class="vbtn"
+id="mAttachBtn"
+onclick="attachMobile()"
+style="background:#7c3aed">
+Attach
+</button>
           </div>
           <div class="vresult" id="mVerRes"></div>
         </div>
         <div class="vsec-inner" id="advEmailWrap" style="display:none">
           <div class="vsec-label">📧 Enter email to verify hash</div>
           <div class="vinput-row">
-  <input class="vinput" id="mobileIn" type="tel"
-    placeholder="Brute force: 61–99"
+  <input class="vinput"
+    id="mobileIn"
+    type="tel"
+    placeholder="Brute force: 61 → 99"
     inputmode="numeric"/>
 
   <button class="vbtn"
@@ -459,7 +472,6 @@ border-radius:8px;
 background:#fff;
 padding:8px">
 </div>
-          <div class="vresult" id="eVerRes"></div>
         </div>
       </div>
     </div>
@@ -1396,13 +1408,37 @@ async function verifyMobile() {
 }
   function initBatchProgress(){
 
-  const el =
+  const old =
     document.getElementById(
       'batchProgress'
     );
 
-  el.style.display =
-    'block';
+  if(old) old.remove();
+
+  const container =
+    document.getElementById(
+      'mVerRes'
+    );
+
+  const div =
+    document.createElement(
+      'div'
+    );
+
+  div.id =
+    'batchProgress';
+
+  div.style.cssText =
+    `
+    display:block;
+    margin-top:8px;
+    max-height:260px;
+    overflow:auto;
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+    background:#fff;
+    padding:8px
+    `;
 
   let html = '';
 
@@ -1413,11 +1449,13 @@ async function verifyMobile() {
   ){
 
     html += `
-    <div style="margin-bottom:8px">
+    <div
+    style="margin-bottom:8px">
 
       <div style="
       display:flex;
-      justify-content:space-between;
+      justify-content:
+      space-between;
       font-size:12px;
       margin-bottom:3px">
 
@@ -1425,7 +1463,8 @@ async function verifyMobile() {
         ${p}xxxxxxxx
         </span>
 
-        <span id="pct-${p}">
+        <span
+        id="pct-${p}">
         0%
         </span>
 
@@ -1450,8 +1489,11 @@ async function verifyMobile() {
     </div>`;
   }
 
-  el.innerHTML =
+  div.innerHTML =
     html;
+
+  container.parentNode
+    .appendChild(div);
 }
 
 function updateBatchProgress(
@@ -1482,18 +1524,21 @@ function updateBatchProgress(
     );
 
   if(bar){
+
     bar.style.width =
       pct.toFixed(2)
       + '%';
   }
 
   if(txt){
+
     txt.textContent =
       pct.toFixed(2)
       + '%';
   }
 }
-  async function attachMobile(){
+
+async function attachMobile(){
 
   const btn =
     document.getElementById(
@@ -1518,17 +1563,25 @@ function updateBatchProgress(
 
   initBatchProgress();
 
-  btn.disabled = true;
+  btn.disabled =
+    true;
+
   btn.textContent =
     'Scanning...';
 
-  let found = false;
-  const workers = [];
-  let totalChecked = 0;
+  let found =
+    false;
 
-  function stopAllWorkers(){
+  let totalChecked =
+    0;
+
+  const workers =
+    [];
+
+  function stopAll(){
 
     workers.forEach(w=>{
+
       try{
         w.terminate();
       }catch(e){}
@@ -1544,11 +1597,9 @@ prefix,
 hash
 } = e.data;
 
-async function sha256(
-text
-){
+async function sha256(text){
 
-const data =
+const enc =
 new TextEncoder()
 .encode(text);
 
@@ -1556,7 +1607,7 @@ const digest =
 await crypto.subtle
 .digest(
 'SHA-256',
-data
+enc
 );
 
 return Array
@@ -1639,11 +1690,6 @@ checked
 });
 }
 }
-
-self.postMessage({
-done:true,
-prefix
-});
 }
 `;
 
@@ -1661,7 +1707,7 @@ prefix
       blob
     );
 
-  // 39 workers at same time
+  // RUN 39 WORKERS
   for(
     let prefix=61;
     prefix<=99;
@@ -1673,7 +1719,9 @@ prefix
         workerURL
       );
 
-    workers.push(worker);
+    workers.push(
+      worker
+    );
 
     worker.postMessage({
       prefix,
@@ -1687,7 +1735,6 @@ prefix
       const d =
         ev.data;
 
-      // progress
       if(d.progress){
 
         totalChecked +=
@@ -1705,7 +1752,349 @@ prefix
           .toLocaleString();
       }
 
-      // MATCH
+      if(
+        d.found &&
+        !found
+      ){
+
+        found =
+          true;
+
+        stopAll();
+
+        const el =
+          document
+          .getElementById(
+            'cMobileVal'
+          );
+
+        el.textContent =
+          d.mobile;
+
+        el.classList
+          .remove('na');
+
+        el.classList
+          .add(
+            'masked'
+          );
+
+        document
+        .getElementById(
+          'cMobileBadge'
+        )
+        .innerHTML =
+        '<span class="contact-badge badge-actual">✓ Attached & Verified</span>';
+
+        showVRes(
+          res,
+          '✅ Match Found: '
+          + d.mobile,
+          true
+        );
+
+        btn.disabled =
+          false;
+
+        btn.textContent =
+          'Attach';
+      }
+    };
+  }
+}
+  function initBatchProgress(){
+
+  const el =
+    document.getElementById(
+      'batchProgress'
+    );
+
+  el.style.display =
+    'block';
+
+  let html = '';
+
+  for(let p=61;p<=99;p++){
+
+    html += `
+    <div style="margin-bottom:8px">
+
+      <div style="
+      display:flex;
+      justify-content:space-between;
+      font-size:12px;
+      margin-bottom:3px">
+
+        <span>${p}xxxxxxxx</span>
+
+        <span id="pct-${p}">
+        0%
+        </span>
+
+      </div>
+
+      <div style="
+      height:6px;
+      background:#e5e7eb;
+      border-radius:999px">
+
+        <div
+        id="bar-${p}"
+        style="
+        width:0%;
+        height:100%;
+        background:#7c3aed;
+        border-radius:999px">
+        </div>
+
+      </div>
+
+    </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function updateBatchProgress(
+  prefix,
+  checked
+){
+
+  const total =
+    100000000;
+
+  const pct =
+    Math.min(
+      100,
+      (checked/total)*100
+    );
+
+  const bar =
+    document.getElementById(
+      'bar-'+prefix
+    );
+
+  const txt =
+    document.getElementById(
+      'pct-'+prefix
+    );
+
+  if(bar){
+    bar.style.width =
+      pct.toFixed(2)
+      + '%';
+  }
+
+  if(txt){
+    txt.textContent =
+      pct.toFixed(2)
+      + '%';
+  }
+}
+
+async function attachMobile(){
+
+  const btn =
+    document.getElementById(
+      'mAttachBtn'
+    );
+
+  const res =
+    document.getElementById(
+      'mVerRes'
+    );
+
+  if(!gMobileHash){
+
+    showVRes(
+      res,
+      '❌ No mobile hash found',
+      false
+    );
+
+    return;
+  }
+
+  initBatchProgress();
+
+  btn.disabled = true;
+  btn.textContent =
+    'Scanning...';
+
+  let found = false;
+  let totalChecked = 0;
+
+  const workers = [];
+
+  function stopAll(){
+
+    workers.forEach(w=>{
+      try{
+        w.terminate();
+      }catch(e){}
+    });
+  }
+
+  const workerCode = `
+self.onmessage =
+async function(e){
+
+const {
+prefix,
+hash
+} = e.data;
+
+async function sha256(t){
+
+const d =
+new TextEncoder()
+.encode(t);
+
+const dg =
+await crypto.subtle
+.digest(
+'SHA-256',
+d
+);
+
+return Array
+.from(
+new Uint8Array(
+dg
+))
+.map(x=>
+x.toString(16)
+.padStart(2,'0')
+)
+.join('');
+}
+
+let checked = 0;
+
+const start =
+parseInt(
+prefix +
+'00000000'
+);
+
+const end =
+parseInt(
+prefix +
+'99999999'
+);
+
+for(
+let n=start;
+n<=end;
+n++
+){
+
+const mobile =
+String(n);
+
+const tries = [
+mobile,
+'91'+mobile,
+'+91'+mobile
+];
+
+for(
+const val
+of tries
+){
+
+const h =
+await sha256(
+val
+);
+
+if(
+h.toLowerCase()
+===
+hash.toLowerCase()
+){
+
+self.postMessage({
+found:true,
+mobile
+});
+
+return;
+}
+}
+
+checked++;
+
+if(
+checked % 1000
+=== 0
+){
+
+self.postMessage({
+progress:true,
+prefix,
+checked
+});
+}
+}
+}
+`;
+
+  const blob =
+    new Blob(
+      [workerCode],
+      {
+        type:
+        'application/javascript'
+      }
+    );
+
+  const url =
+    URL.createObjectURL(
+      blob
+    );
+
+  // RUN ALL 39
+  for(
+    let prefix=61;
+    prefix<=99;
+    prefix++
+  ){
+
+    const worker =
+      new Worker(url);
+
+    workers.push(worker);
+
+    worker.postMessage({
+      prefix,
+      hash:
+      gMobileHash
+    });
+
+    worker.onmessage =
+    function(ev){
+
+      const d =
+        ev.data;
+
+      if(d.progress){
+
+        totalChecked +=
+          1000;
+
+        updateBatchProgress(
+          d.prefix,
+          d.checked
+        );
+
+        btn.textContent =
+          'Scanning '
+          +
+          totalChecked
+          .toLocaleString();
+      }
+
       if(
         d.found &&
         !found
@@ -1713,7 +2102,7 @@ prefix
 
         found = true;
 
-        stopAllWorkers();
+        stopAll();
 
         document
         .getElementById(
@@ -1721,15 +2110,6 @@ prefix
         )
         .textContent =
           d.mobile;
-
-        document
-        .getElementById(
-          'cMobileVal'
-        )
-        .classList
-        .add(
-          'masked'
-        );
 
         document
         .getElementById(
