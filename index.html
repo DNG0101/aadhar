@@ -203,7 +203,33 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 .vsec-inner:last-child{margin-bottom:0}
 .vsec-label{font-size:.63rem;font-weight:700;color:#374151;margin-bottom:5px;
   display:flex;align-items:center;gap:4px}
-.vinput-row{display:flex;gap:7px}
+.vinput-row{
+  display:flex;
+  gap:7px;
+  align-items:center;
+}
+
+.attach-btn{
+  background:#7c3aed !important;
+}
+
+/* Mobile browser fix */
+@media(max-width:520px){
+
+  .mobile-actions{
+    flex-wrap:wrap;
+  }
+
+  .mobile-actions .vinput{
+    width:100%;
+    flex:unset;
+  }
+
+  .mobile-actions .vbtn{
+    flex:1;
+    min-width:90px;
+  }
+}
 .vinput{flex:1;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:7px;
   font-size:.8rem;font-family:inherit;outline:none;background:#fff;transition:border-color .2s}
 .vinput:focus{border-color:var(--ok)}
@@ -418,20 +444,21 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
       <div class="adv-body" id="advBody">
         <div class="vsec-inner" id="advMobileWrap" style="display:none">
           <div class="vsec-label">📱 Enter mobile to verify hash</div>
-          <div class="vinput-row">
+          <div class="vinput-row mobile-actions">
   <input class="vinput" id="mobileIn" type="tel" maxlength="10"
-    placeholder="10-digit mobile" inputmode="numeric"/>
+    placeholder="Optional prefix (98 / 9876 or leave empty)"
+    inputmode="numeric"/>
 
-  <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">
+  <button class="vbtn" id="mVerBtn"
+    onclick="verifyMobile()">
     Verify
   </button>
 
-  <!-- <button class="vbtn"
+  <button class="vbtn attach-btn"
     id="mAttachBtn"
-    onclick="attachMobile()"
-    style="background:#7c3aed;min-width:78px">
+    onclick="attachMobile()">
     Attach
-  </button> -->
+  </button>
 </div>
           <div class="vresult" id="mVerRes"></div>
         </div>
@@ -1376,7 +1403,110 @@ async function verifyMobile() {
   } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
   btn.disabled = false; btn.textContent = 'Verify';
 }
-attachMobile()
+  async function attachMobile(){
+
+  const res =
+    document.getElementById('mVerRes');
+
+  const btn =
+    document.getElementById('mAttachBtn');
+
+  if(!gMobileHash){
+    showVRes(
+      res,
+      '❌ No mobile hash in QR',
+      false
+    );
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+
+  try{
+
+    const starts = [6,7,8,9];
+    let checked = 0;
+    const chunk = 300;
+
+    for(const s of starts){
+
+      const start =
+        parseInt(s + '000000000');
+
+      const end =
+        parseInt(s + '999999999');
+
+      for(let num=start; num<=end; num++){
+
+        const mobile = String(num);
+
+        const hash =
+          await sha256nRaw(mobile,1);
+
+        checked++;
+
+        if(
+          hash.toLowerCase() ===
+          gMobileHash.toLowerCase()
+        ){
+
+          document.getElementById(
+            'cMobileVal'
+          ).textContent = mobile;
+
+          document.getElementById(
+            'cMobileBadge'
+          ).innerHTML = `
+          <span class="contact-badge badge-actual">
+            ✓ Attached & Verified
+          </span>`;
+
+          showVRes(
+            res,
+            `✅ Match Found: ${mobile}`,
+            true
+          );
+
+          btn.disabled = false;
+          btn.textContent = 'Attach';
+
+          return;
+        }
+
+        if(checked % chunk === 0){
+          btn.textContent =
+            `Scanning ${checked.toLocaleString()}`;
+
+          await new Promise(r =>
+            setTimeout(r,0)
+          );
+        }
+      }
+    }
+
+    showVRes(
+      res,
+      '❌ No match found',
+      false
+    );
+
+  }catch(e){
+
+    console.error(e);
+
+    showVRes(
+      res,
+      '❌ ' + e.message,
+      false
+    );
+
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Attach';
+}
+  
 
 async function verifyEmail() {
   const inp   = document.getElementById('emailIn');
