@@ -203,33 +203,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 .vsec-inner:last-child{margin-bottom:0}
 .vsec-label{font-size:.63rem;font-weight:700;color:#374151;margin-bottom:5px;
   display:flex;align-items:center;gap:4px}
-.vinput-row{
-  display:flex;
-  gap:7px;
-  align-items:center;
-}
-
-.attach-btn{
-  background:#7c3aed !important;
-}
-
-/* Mobile browser fix */
-@media(max-width:520px){
-
-  .mobile-actions{
-    flex-wrap:wrap;
-  }
-
-  .mobile-actions .vinput{
-    width:100%;
-    flex:unset;
-  }
-
-  .mobile-actions .vbtn{
-    flex:1;
-    min-width:90px;
-  }
-}
+.vinput-row{display:flex;gap:7px}
 .vinput{flex:1;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:7px;
   font-size:.8rem;font-family:inherit;outline:none;background:#fff;transition:border-color .2s}
 .vinput:focus{border-color:var(--ok)}
@@ -444,19 +418,21 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
       <div class="adv-body" id="advBody">
         <div class="vsec-inner" id="advMobileWrap" style="display:none">
           <div class="vsec-label">📱 Enter mobile to verify hash</div>
-          <div class="vinput-row mobile-actions">
-  <input class="vinput" id="mobileIn" type="tel" maxlength="10"
-    placeholder="Optional prefix (98 / 9876 or leave empty)"
+          <div class="vinput-row">
+  <input class="vinput" id="mobileIn" type="tel"
+    placeholder="Leave empty → brute force 61–99"
     inputmode="numeric"/>
 
-  <button class="vbtn" id="mVerBtn"
+  <button class="vbtn"
+    id="mVerBtn"
     onclick="verifyMobile()">
     Verify
   </button>
 
-  <button class="vbtn attach-btn"
+  <button class="vbtn"
     id="mAttachBtn"
-    onclick="attachMobile()">
+    onclick="attachMobile()"
+    style="background:#7c3aed">
     Attach
   </button>
 </div>
@@ -1352,155 +1328,219 @@ function openPhotoModal() {
 }
 function closeModal() { document.getElementById('photoModal').classList.remove('show'); }
 
-async function attachMobile(){
+// ═════════════════════════════════════════════════════════════
+//  HASH VERIFICATION (Advanced collapsible panel)
+// ═════════════════════════════════════════════════════════════
+async function verifyMobile() {
+  const inp    = document.getElementById('mobileIn');
+  const res    = document.getElementById('mVerRes');
+  const btn    = document.getElementById('mVerBtn');
+  const mobile = inp.value.trim().replace(/\D/g,'');
+
+  if (!/^\d{10}$/.test(mobile)) {
+    inp.classList.add('error');
+    showVRes(res, '❌ Enter a valid 10-digit mobile number', false); return;
+  }
+  inp.classList.remove('error');
+  if (!gMobileHash) {
+    showVRes(res, 'ℹ️ No hash found in QR — cannot verify.', null); return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Verifying…';
+  const lastDigit = gRefId ? (parseInt(gRefId.charAt(3),10) || 1) : 1;
+  const specIter  = lastDigit < 1 ? 1 : lastDigit;
+  const toTry     = [specIter, ...[1,2,3,4,5,6,7,8,9].filter(i => i !== specIter)];
+
+  const strategies = [
+    {id:'A', fn: n => sha256nRaw(mobile, n)},
+    {id:'B', fn: n => sha256nHex(mobile, n)},
+    {id:'C', fn: n => sha256nRaw('91'+mobile, n)},
+    {id:'D', fn: n => sha256nHex('91'+mobile, n)},
+    {id:'E', fn: n => sha256nRaw('+91'+mobile, n)},
+    {id:'F', fn: _ => sha256nRaw(gUidLast4+mobile, 1)},
+    {id:'G', fn: n => sha256nRaw(gUidLast4+mobile, n)},
+  ];
+
+  try {
+    for (const n of toTry) {
+      for (const s of strategies) {
+        const h = await s.fn(n);
+        if (h.toLowerCase() === gMobileHash.toLowerCase()) {
+          showVRes(res,
+            `✅ Mobile verified!\nStrategy ${s.id} · ${n} SHA-256 iteration${n>1?'s':''}`,
+            true);
+          btn.disabled = false; btn.textContent = 'Verify'; return;
+        }
+      }
+    }
+    showVRes(res,
+      `❌ No match after ${toTry.length * strategies.length} attempts.\n` +
+      `Enter the exact mobile number registered with UIDAI.`, false);
+  } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
+  btn.disabled = false; btn.textContent = 'Verify';
+}
+  async function attachMobile(){
 
   const btn =
-    document.getElementById('mAttachBtn');
+    document.getElementById(
+      'mAttachBtn'
+    );
 
   const res =
-    document.getElementById('mVerRes');
+    document.getElementById(
+      'mVerRes'
+    );
 
   if(!gMobileHash){
+
     showVRes(
       res,
-      '❌ No mobile hash found in QR',
+      '❌ No mobile hash in QR',
       false
     );
+
     return;
   }
 
   btn.disabled = true;
-  btn.textContent = 'Starting...';
+  btn.textContent =
+    'Starting...';
 
   let found = false;
-  const workers = [];
-  let totalChecked = 0;
   let finished = 0;
+  let totalChecked = 0;
+
+  const workers = [];
 
   function stopAllWorkers(){
+
     workers.forEach(w=>{
-      try{ w.terminate(); }
-      catch(e){}
+      try{
+        w.terminate();
+      }catch(e){}
     });
   }
 
-  // worker logic
+  // 61 → 99
+  const queue = [];
+
+  for(
+    let p = 61;
+    p <= 99;
+    p++
+  ){
+    queue.push(p);
+  }
+
+  const MAX_WORKERS = 16;
+
+  // worker code
   const workerCode = `
-  self.onmessage = async function(e){
+self.onmessage =
+async function(e){
 
-    const {
-      start,
-      end,
-      hash,
-      uidLast4,
-      refId
-    } = e.data;
+const {
+prefix,
+hash
+} = e.data;
 
-    async function sha256(text){
-      const enc =
-        new TextEncoder()
-        .encode(text);
+async function sha256(text){
 
-      const digest =
-        await crypto.subtle.digest(
-          'SHA-256',
-          enc
-        );
+const enc =
+new TextEncoder()
+.encode(text);
 
-      return Array
-      .from(
-        new Uint8Array(digest)
-      )
-      .map(x =>
-        x.toString(16)
-        .padStart(2,'0')
-      )
-      .join('');
-    }
+const digest =
+await crypto.subtle.digest(
+'SHA-256',
+enc
+);
 
-    const lastDigit =
-      refId
-      ? (
-        parseInt(
-          refId.charAt(3),
-          10
-        ) || 1
-      )
-      : 1;
+return Array.from(
+new Uint8Array(
+digest
+))
+.map(x =>
+x.toString(16)
+.padStart(2,'0')
+).join('');
+}
 
-    const specIter =
-      Math.max(1,lastDigit);
+let checked = 0;
 
-    const iterations = [
-      specIter,
-      ...[1,2,3,4,5,6,7,8,9]
-      .filter(x =>
-        x !== specIter
-      )
-    ];
+const start =
+parseInt(
+prefix + '00000000'
+);
 
-    let checked = 0;
+const end =
+parseInt(
+prefix + '99999999'
+);
 
-    for(
-      let num=start;
-      num<=end;
-      num++
-    ){
+for(
+let num=start;
+num<=end;
+num++
+){
 
-      const mobile =
-        String(num);
+const mobile =
+String(num);
 
-      const attempts = [
-        mobile,
-        '91'+mobile,
-        '+91'+mobile,
-        uidLast4+mobile
-      ];
+const tries = [
+mobile,
+'91'+mobile,
+'+91'+mobile
+];
 
-      for(const val of attempts){
+for(
+const value
+of tries
+){
 
-        for(const n of iterations){
+let current =
+value;
 
-          let current = val;
+current =
+await sha256(
+current
+);
 
-          for(let i=0;i<n;i++){
-            current =
-              await sha256(
-                current
-              );
-          }
+if(
+current
+.toLowerCase()
+===
+hash
+.toLowerCase()
+){
 
-          if(
-            current.toLowerCase()
-            === hash.toLowerCase()
-          ){
+self.postMessage({
+found:true,
+mobile
+});
 
-            self.postMessage({
-              found:true,
-              mobile
-            });
+return;
+}
+}
 
-            return;
-          }
-        }
-      }
+checked++;
 
-      checked++;
+if(
+checked % 2000
+=== 0
+){
 
-      if(
-        checked % 2000 === 0
-      ){
-        self.postMessage({
-          progress:2000
-        });
-      }
-    }
+self.postMessage({
+progress:2000
+});
+}
+}
 
-    self.postMessage({
-      done:true
-    });
-  };
-  `;
+self.postMessage({
+done:true
+});
+}
+`;
 
   const blob =
     new Blob(
@@ -1512,63 +1552,31 @@ async function attachMobile(){
     );
 
   const workerURL =
-    URL.createObjectURL(blob);
-
-  // 60,61,62,63...99
-  const ranges = [];
-
-  for(
-    let prefix = 60;
-    prefix <= 99;
-    prefix++
-  ){
-
-    ranges.push([
-      parseInt(
-        prefix +
-        '00000000'
-      ),
-
-      parseInt(
-        prefix +
-        '99999999'
-      )
-    ]);
-  }
-
-  // CPU safe
-  const maxWorkers =
-    Math.min(
-      navigator
-      .hardwareConcurrency || 8,
-      12
+    URL.createObjectURL(
+      blob
     );
 
-  let currentIndex = 0;
-
-  function runWorker(){
+  function startNextWorker(){
 
     if(
-      currentIndex
-      >= ranges.length
+      found ||
+      queue.length === 0
     ) return;
 
-    const r =
-      ranges[
-        currentIndex++
-      ];
+    const prefix =
+      queue.shift();
 
     const worker =
-      new Worker(workerURL);
+      new Worker(
+        workerURL
+      );
 
     workers.push(worker);
 
     worker.postMessage({
-      start:r[0],
-      end:r[1],
-      hash:gMobileHash,
-      uidLast4:gUidLast4,
-      refId:gRefId
+      prefix,
+      hash:
+      gMobileHash
     });
 
     worker.onmessage =
@@ -1584,11 +1592,12 @@ async function attachMobile(){
 
         btn.textContent =
           'Scanning '
-          + totalChecked
+          +
+          totalChecked
           .toLocaleString();
       }
 
-      // MATCH FOUND
+      // MATCH
       if(
         d.found &&
         !found
@@ -1598,38 +1607,33 @@ async function attachMobile(){
 
         stopAllWorkers();
 
-        const mobile =
+        document
+        .getElementById(
+          'cMobileVal'
+        )
+        .textContent =
           d.mobile;
 
-        const el =
-          document
-          .getElementById(
-            'cMobileVal'
-          );
-
-        el.textContent =
-          mobile;
-
-        el.classList
-          .remove('na');
-
-        el.classList
-          .add('masked');
+        document
+        .getElementById(
+          'cMobileVal'
+        )
+        .classList
+        .add(
+          'masked'
+        );
 
         document
         .getElementById(
           'cMobileBadge'
         )
-        .innerHTML = \`
-        <span class=
-        "contact-badge badge-actual">
-        ✓ Attached & Verified
-        </span>\`;
+        .innerHTML =
+          '<span class="contact-badge badge-actual">✓ Attached & Verified</span>';
 
         showVRes(
           res,
           '✅ Match Found: '
-          + mobile,
+          + d.mobile,
           true
         );
 
@@ -1638,19 +1642,19 @@ async function attachMobile(){
 
         btn.textContent =
           'Attach';
+
+        return;
       }
 
+      // worker finished
       if(d.done){
 
         finished++;
 
-        // launch next
-        runWorker();
+        startNextWorker();
 
         if(
-          finished
-          === ranges.length
-          &&
+          finished === 39 &&
           !found
         ){
 
@@ -1670,13 +1674,13 @@ async function attachMobile(){
     };
   }
 
-  // start workers
+  // Start first 16
   for(
     let i=0;
-    i<maxWorkers;
+    i<MAX_WORKERS;
     i++
   ){
-    runWorker();
+    startNextWorker();
   }
 }
 
