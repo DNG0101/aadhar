@@ -341,7 +341,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
     <div class="vsec" id="vMobile" style="display:none">
       <div class="vtitle">📱 Verify Mobile Number</div>
       <div class="vinput-row">
-        <input class="vinput" id="mobileIn" type="tel" maxlength="10" placeholder="Enter 10-digit mobile number"/>
+        <input class="vinput" id="mobileIn" type="tel" maxlength="14" placeholder="10-digit or +91XXXXXXXXXX"/>
         <button class="vbtn" id="mVerBtn" onclick="verifyMobile()">Verify</button>
       </div>
       <div class="vresult" id="mVerRes"></div>
@@ -559,27 +559,46 @@ function tick() {
   rafId = requestAnimationFrame(tick);
 }
 
+// Fast jsQR: downscale to 640px wide — ~6x faster than full 1080p.
+// Aadhaar QR is large/high-contrast; 640px is sufficient for decode.
+let _jsqrFrameCount = 0;
 function jsqrFrame() {
   if (!scanning) return false;
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return false;
-  if (sc.width !== vw || sc.height !== vh) { sc.width = vw; sc.height = vh; }
-  ctx.drawImage(video, 0, 0);
-  const imgData = ctx.getImageData(0, 0, vw, vh);
+
+  _jsqrFrameCount++;
+
+  // Downscale to max 640px wide (preserving aspect ratio)
+  const scale = Math.min(1, 640 / vw);
+  const sw = Math.round(vw * scale), sh = Math.round(vh * scale);
+  if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+  ctx.drawImage(video, 0, 0, sw, sh);
+  const imgData = ctx.getImageData(0, 0, sw, sh);
+
   let code = null;
-  try { code = jsQR(imgData.data, vw, vh, {inversionAttempts: 'dontInvert'}); } catch(e) {}
-  if (!code) {
-    try { code = jsQR(imgData.data, vw, vh, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
+
+  // Pass 1: fast dontInvert (most common)
+  try { code = jsQR(imgData.data, sw, sh, {inversionAttempts: 'dontInvert'}); } catch(e) {}
+
+  // Pass 2: attemptBoth — every other frame (covers inverted QRs)
+  if (!code && _jsqrFrameCount % 2 === 0) {
+    try { code = jsQR(imgData.data, sw, sh, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
   }
-  if (!code) {
+
+  // Pass 3: 1.5x upscale — every 8th frame only (small/far QRs)
+  if (!code && _jsqrFrameCount % 8 === 0) {
     try {
-      const c2 = getAux(vw * 2, vh * 2);
+      const sw2 = Math.min(Math.round(sw * 1.5), 1280);
+      const sh2 = Math.round(sh * 1.5);
+      const c2  = getAux(sw2, sh2);
       const cx2 = c2.getContext('2d', {willReadFrequently: true});
-      cx2.drawImage(sc, 0, 0, vw * 2, vh * 2);
-      code = jsQR(cx2.getImageData(0, 0, vw * 2, vh * 2).data, vw * 2, vh * 2,
-                  {inversionAttempts: 'attemptBoth'});
+      cx2.drawImage(sc, 0, 0, sw2, sh2);
+      code = jsQR(cx2.getImageData(0, 0, sw2, sh2).data, sw2, sh2,
+                  {inversionAttempts: 'dontInvert'});
     } catch(e) {}
   }
+
   if (code) {
     onCameraHit(code.data || code.text || '', code.binaryData || null);
     return true;
@@ -1180,11 +1199,17 @@ async function verifyMobile() {
   const inp    = document.getElementById('mobileIn');
   const res    = document.getElementById('mVerRes');
   const btn    = document.getElementById('mVerBtn');
-  const mobile = inp.value.trim();
+  const raw    = inp.value.trim();
+
+  // Normalize: strip leading +91 / 91 / 0091 to get bare 10-digit number
+  let mobile = raw.replace(/\s+/g, '');
+  if (mobile.startsWith('+91')) mobile = mobile.slice(3);
+  else if (mobile.startsWith('0091')) mobile = mobile.slice(4);
+  else if (mobile.startsWith('91') && mobile.length === 12) mobile = mobile.slice(2);
 
   if (!/^\d{10}$/.test(mobile)) {
     inp.classList.add('error');
-    showVRes(res, '❌ Enter a valid 10-digit mobile number', false);
+    showVRes(res, '❌ Enter a valid 10-digit mobile (or with +91/91 prefix)', false);
     return;
   }
   inp.classList.remove('error');
@@ -1194,17 +1219,17 @@ async function verifyMobile() {
   try {
     const lastDigit = gRefId && gRefId.length >= 4 ? (parseInt(gRefId.charAt(3)) || 1) : 1;
     const specIter  = lastDigit < 1 ? 1 : lastDigit;
-    dbg('inf', `Mobile verify: refId="${gRefId}" specIter=${specIter}`);
+    dbg('inf', `Mobile verify: refId="${gRefId}" specIter=${specIter} mobile="${mobile}"`);
 
     // Build ordered list: spec iteration first, then all others 1–9
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
 
-    // Try plain number and with country code prefixes
+    // Try bare number + all common prefix variants (UIDAI may hash any form)
     const candidates = [
-      {label: 'plain', value: mobile},
-      {label: '+91 prefix', value: '+91' + mobile},
-      {label: '91 prefix', value: '91' + mobile},
+      {label: 'plain',       value: mobile},
+      {label: '+91 prefix',  value: '+91' + mobile},
+      {label: '91 prefix',   value: '91'  + mobile},
       {label: '0091 prefix', value: '0091' + mobile},
     ];
 
@@ -1213,12 +1238,9 @@ async function verifyMobile() {
         const computed = await sha256n(cand.value, n);
         const match    = computed.toLowerCase() === gMobileHash.toLowerCase();
         if (match) {
-          const iterLabel = n !== specIter ? ` (fallback iter ${n})` : ` (iter ${n}, per spec)`;
-          const candLabel = cand.label !== 'plain' ? ` with ${cand.label}` : '';
           showVRes(res,
-            `✅ Mobile Verified!\n${mobile}${candLabel}\nSHA-256 × ${n}${candLabel ? ', ' + cand.label : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
+            `✅ Mobile Verified!\n${mobile}\nSHA-256 × ${n}${cand.label !== 'plain' ? ' · hashed as ' + cand.value : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
             true);
-          // FIX #5 — Show verified mobile on result card
           showVerifiedContact('mobile', mobile);
           btn.disabled = false; btn.textContent = 'Verified ✅';
           dbg('ok', `Mobile verified: iter=${n} candidate="${cand.value}"`);
@@ -1370,6 +1392,7 @@ async function toggleFocus() {
 function stopCam(resetUI) {
   scanning  = false;
   detecting = false;
+  _jsqrFrameCount = 0;
   cancelAnimationFrame(rafId);
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; vTrack = null; }
   video.srcObject = null;
