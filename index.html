@@ -3,76 +3,49 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aadhaar QR Code Scanner</title>
+  <title>Aadhaar QR Scanner</title>
 
   <!--
-  ══════════════════════════════════════════════════════════════════════
-  AADHAAR QR SCANNER — OFFICIAL UIDAI SPECIFICATION IMPLEMENTATION
-  Based on: "SECURE QR CODE SPECIFICATION Version 0" — UIDAI, 2011-2019
-  ══════════════════════════════════════════════════════════════════════
+  ═══════════════════════════════════════════════════════════════
+  OFFICIAL UIDAI SECURE QR SPEC (v0, 2011-2019) IMPLEMENTATION
+  ─────────────────────────────────────────────────────────────
+  QR DETECTION ENGINE (why jsQR alone fails on Aadhaar):
+    Aadhaar Secure QR = Version ~40 QR code = 177×177 modules
+    jsQR needs ≥2px per module = ≥354px QR area in the image
+    Fix: try 8 different scales (0.25x → 4x) + grayscale pass
+    Fallback: @zxing/library UMD (same engine as Android APK)
 
-  ─── FORMAT A: Old XML (pre-2019 Aadhaar letter) ────────────────────
-    QR encoding mode : Byte / Alphanumeric
-    Raw data         : XML string with root <PrintLetterBarcodeData>
-    Fields (attrs)   : uid, name, gender, yob, dob, co, house, street,
-                       lm, loc, vtc, po, dist, subdist, state, pc, country
-    Parse            : DOMParser("text/xml") → getAttribute()
+  APK ANALYSIS FINDINGS (base_.apk):
+    • Library: in.net.uidai.qrcodescanner (official UIDAI SDK)
+    • Scanner: journeyapps/barcodescanner (ZXing wrapper)
+    • ML Kit TFLite models for barcode detection
+    • Methods: decodeQRCode, decompress, validateSignature
+    • Classes: QrModule, CryptoModule, ScannerModule, crypto/a,b
+    • Cert verify: SHA256withRSA using assets/Prod_QR_CodeSignValidationCert.cer
 
-  ─── FORMAT B: New Secure QR (Official UIDAI Spec) ──────────────────
-    QR encoding mode : NUMERIC (decimal digit string, 100s of digits)
-    Raw data         : Very long decimal integer string
-
-    OFFICIAL DECODE STEPS (from UIDAI Spec Section 3.2):
-      1. Take base-10 value from QR → convert to BigInteger
-      2. Convert BigInteger → big-endian byte array
-      3. DECOMPRESS the byte array using ZLIB (this was the missing step!)
-      4. Split decompressed bytes by delimiter byte value 255 (0xFF)
-         using ISO-8859-1 encoding
-      5. Extract fields in this EXACT order:
-           seg[0]  = Email_mobile_present_bit_indicator (0/1/2/3)
-                     0=none, 1=only email, 2=only mobile, 3=both
-           seg[1]  = referenceId (last 4 digits UID + DDMMYYYYHHMMSSsss)
-           seg[2]  = name
-           seg[3]  = date of birth
-           seg[4]  = gender (M/F/T)
-           seg[5]  = care of
-           seg[6]  = district
-           seg[7]  = landmark
-           seg[8]  = house
-           seg[9]  = location
-           seg[10] = pin code
-           seg[11] = post office
-           seg[12] = state
-           seg[13] = street
-           seg[14] = sub district
-           seg[15] = VTC
-      6. After seg[15]: JPEG2000 photo (variable size)
-      7. From END: 256-byte RSA signature
-      8. Before signature: 32-byte mobile hash (if indicator 2 or 3)
-      9. Before mobile hash: 32-byte email hash (if indicator 1 or 3)
-     10. Photo ends at (length - 256 - 32*emailPresent - 32*mobilePresent)
-
-  ─── KEY INSIGHT ────────────────────────────────────────────────────
-    ZLIB decompression was the missing piece! Without it, reading the
-    compressed bytes as text produces garbage like "pEy", "PW0554ZRS".
-    The decompressed bytes are then split by 0xFF with ISO-8859-1 encoding
-    (not UTF-8) — this handles Indian language names in the Latin-1 range.
-
-  ─── Libraries Used ─────────────────────────────────────────────────
-    jsQR v1.4.0  — QR code scanning from camera/image
-    pako v2.1.0  — ZLIB inflate (decompression) in browser
-  ══════════════════════════════════════════════════════════════════════
+  PARSE ALGORITHM (confirmed from UIDAI spec + APK):
+    1. QR → decimal string (NUMERIC mode, 500-700 digits)
+    2. BigInteger(decimal) → big-endian byte array
+    3. pako.inflate(bytes) → zlib decompress  ← was missing before
+    4. Split decompressed bytes by 0xFF using ISO-8859-1 encoding
+    5. seg[0]=indicator  seg[1]=refId  seg[2]=name  seg[3]=dob
+       seg[4]=gender  seg[5]=careOf  seg[6]=district  seg[7]=landmark
+       seg[8]=house  seg[9]=location  seg[10]=pinCode  seg[11]=postOffice
+       seg[12]=state  seg[13]=street  seg[14]=subDistrict  seg[15]=VTC
+    6. After seg[15]: JPEG2000 photo bytes
+    7. From END: 256B RSA sig, 32B mobile hash, 32B email hash
+  ═══════════════════════════════════════════════════════════════
   -->
 
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     :root{
-      --pri:#1a237e;--ok:#2e7d32;--warn:#e65100;
-      --err:#c62828;--bg:#f0f2f5;--card:#fff;
-      --txt:#1a1a2e;--dim:#6b7280;--bdr:#e5e7eb;--sc:#00e5ff
+      --pri:#1a237e;--ok:#2e7d32;--warn:#e65100;--err:#c62828;
+      --bg:#f0f2f5;--card:#fff;--txt:#1a1a2e;--dim:#6b7280;--bdr:#e5e7eb;--sc:#00e5ff
     }
     body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
 
@@ -84,35 +57,34 @@
     .hdr h1{font-size:1.1rem;font-weight:700}
     .hdr p{font-size:.7rem;opacity:.75;margin-top:2px}
 
-    .strip{background:#e8eaf6;border-left:4px solid var(--pri);padding:7px 15px;
-      font-size:.7rem;color:#283593;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-    .bge{background:var(--pri);color:#fff;border-radius:4px;padding:2px 7px;font-size:.67rem;font-weight:700}
-    .bge.r{background:#b71c1c}.bge.g{background:#2e7d32}
+    .strip{background:#e8eaf6;border-left:4px solid var(--pri);padding:6px 15px;
+      font-size:.68rem;color:#283593;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+    .bge{background:var(--pri);color:#fff;border-radius:4px;padding:1px 6px;font-size:.65rem;font-weight:700}
+    .bge.g{background:#2e7d32}.bge.r{background:#b71c1c}.bge.o{background:#e65100}
 
-    .wrap{max-width:520px;margin:0 auto;padding:15px 12px 40px}
+    .wrap{max-width:520px;margin:0 auto;padding:14px 11px 40px}
 
-    .msg{border-radius:9px;padding:10px 13px;font-size:.8rem;
-      margin-bottom:12px;display:none;align-items:flex-start;gap:8px}
+    .msg{border-radius:9px;padding:9px 12px;font-size:.79rem;
+      margin-bottom:11px;display:none;align-items:flex-start;gap:8px;line-height:1.5}
     .msg.show{display:flex}
     .msg.err{background:#fef2f2;border:1px solid #fca5a5;color:var(--err)}
     .msg.inf{background:#eff6ff;border:1px solid #93c5fd;color:#1e40af}
     .msg.warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412}
     .msg svg{flex-shrink:0;width:16px;height:16px;margin-top:1px}
 
+    /* ─── Scanner card ─── */
     .card{background:var(--card);border-radius:17px;overflow:hidden;
-      box-shadow:0 4px 20px rgba(0,0,0,.09);margin-bottom:15px}
-
+      box-shadow:0 4px 20px rgba(0,0,0,.09);margin-bottom:14px}
     .vp{position:relative;width:100%;aspect-ratio:1;background:#111;overflow:hidden}
     #video{width:100%;height:100%;object-fit:cover;display:block}
-    #canvas{display:none}
-
+    #scanCanvas{display:none}
     .dimov{position:absolute;inset:0;
-      background:radial-gradient(ellipse 68% 68% at center,transparent 0%,rgba(0,0,0,.62) 100%);
+      background:radial-gradient(ellipse 68% 68% at center,transparent 0%,rgba(0,0,0,.6) 100%);
       pointer-events:none}
     .fw{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
     .sf{width:65%;aspect-ratio:1;position:relative}
-    .sf::before,.sf::after,.sf .br,.sf .bl{
-      content:'';position:absolute;width:28px;height:28px;border-color:var(--sc);border-style:solid}
+    .sf::before,.sf::after,.sf .br,.sf .bl{content:'';position:absolute;
+      width:28px;height:28px;border-color:var(--sc);border-style:solid}
     .sf::before{top:0;left:0;border-width:4px 0 0 4px;border-radius:4px 0 0 4px}
     .sf::after{top:0;right:0;border-width:4px 4px 0 0;border-radius:0 4px 0 0}
     .sf .br{bottom:0;right:0;border-width:0 4px 4px 0;border-radius:0 0 4px 0}
@@ -125,131 +97,149 @@
       opacity:0;pointer-events:none;transition:opacity .1s}
     .okflash.on{opacity:1;transition:opacity 0s}
     .stat{position:absolute;bottom:12px;left:0;right:0;text-align:center;
-      color:rgba(255,255,255,.9);font-size:.75rem;font-weight:500;
+      color:rgba(255,255,255,.9);font-size:.74rem;font-weight:500;
       text-shadow:0 1px 4px rgba(0,0,0,.8);padding:0 10px}
 
     .ctrls{display:flex;border-top:1px solid var(--bdr)}
-    .cb{flex:1;padding:11px 5px;background:none;border:none;cursor:pointer;
-      display:flex;flex-direction:column;align-items:center;gap:4px;
-      font-size:.65rem;color:var(--dim);font-weight:500;transition:background .15s,color .15s}
+    .cb{flex:1;padding:10px 5px;background:none;border:none;cursor:pointer;
+      display:flex;flex-direction:column;align-items:center;gap:3px;
+      font-size:.63rem;color:var(--dim);font-weight:500;transition:background .15s,color .15s}
     .cb:hover{background:#f3f4f6;color:var(--pri)}
     .cb.on{color:#ff6f00}
-    .cb svg{width:20px;height:20px}
-    .cdv{width:1px;background:var(--bdr);margin:8px 0}
-
-    .sw{padding:14px}
-    .btn{width:100%;padding:13px;
-      background:linear-gradient(135deg,#1a237e,#3949ab);
-      color:#fff;border:none;border-radius:11px;
-      font-size:.9rem;font-weight:700;cursor:pointer;
-      display:flex;align-items:center;justify-content:center;gap:8px;
-      transition:transform .1s,box-shadow .2s;
-      box-shadow:0 4px 14px rgba(26,35,126,.35)}
+    .cb svg{width:19px;height:19px}
+    .cdv{width:1px;background:var(--bdr);margin:7px 0}
+    .sw{padding:13px}
+    .btn{width:100%;padding:12px;background:linear-gradient(135deg,#1a237e,#3949ab);
+      color:#fff;border:none;border-radius:11px;font-size:.88rem;font-weight:700;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
+      transition:transform .1s,box-shadow .2s;box-shadow:0 4px 14px rgba(26,35,126,.35)}
     .btn:hover:not(:disabled){transform:translateY(-1px)}
     .btn:disabled{background:#9ca3af;box-shadow:none;cursor:not-allowed}
-    .sp{width:16px;height:16px;border:2px solid rgba(255,255,255,.3);
+    .sp{width:15px;height:15px;border:2px solid rgba(255,255,255,.3);
       border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:none}
     .loading .sp{display:block}
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    .upload-row{display:flex;gap:8px;padding:0 14px 14px}
-    .btn-upload{flex:1;padding:11px;background:#f8f9ff;
-      color:var(--pri);border:2px dashed #c5cae9;border-radius:11px;
-      font-size:.82rem;font-weight:600;cursor:pointer;
-      display:flex;align-items:center;justify-content:center;gap:6px;
-      transition:background .15s}
-    .btn-upload:hover{background:#e8eaf6}
-    #fileInput{display:none}
+    /* ─── Upload area ─── */
+    .upload-section{padding:0 13px 13px}
+    .upload-label{font-size:.68rem;font-weight:700;color:var(--dim);
+      text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px;display:block}
+    .upload-drop{border:2px dashed #c5cae9;border-radius:12px;background:#f8f9ff;
+      padding:18px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+    .upload-drop:hover,.upload-drop.drag{border-color:var(--pri);background:#e8eaf6}
+    .upload-drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+    .upload-ico{font-size:1.8rem;margin-bottom:5px}
+    .upload-txt{font-size:.79rem;font-weight:600;color:var(--pri);margin-bottom:3px}
+    .upload-sub{font-size:.68rem;color:var(--dim)}
 
-    /* result */
+    /* Image preview before/during scan */
+    .preview-box{display:none;padding:10px 13px;background:#f8f9ff;border-top:1px solid var(--bdr)}
+    .preview-box.show{display:block}
+    .preview-inner{display:flex;gap:10px;align-items:flex-start}
+    #previewImg{width:80px;height:80px;object-fit:contain;border-radius:8px;
+      border:1px solid var(--bdr);background:#e5e7eb;flex-shrink:0}
+    .preview-info{flex:1;min-width:0}
+    .preview-name{font-size:.72rem;font-weight:700;color:var(--txt);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .preview-dim{font-size:.65rem;color:var(--dim);margin-top:2px}
+    .prog-bar{height:4px;background:#e5e7eb;border-radius:4px;margin-top:8px;overflow:hidden}
+    .prog-fill{height:100%;background:linear-gradient(90deg,var(--pri),#7c4dff);
+      border-radius:4px;transition:width .3s;width:0%}
+    .prog-label{font-size:.62rem;color:var(--pri);font-weight:600;margin-top:4px}
+    .scan-attempts{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}
+    .att-chip{font-size:.58rem;padding:1px 6px;border-radius:20px;font-weight:600}
+    .att-chip.pending{background:#f3f4f6;color:var(--dim)}
+    .att-chip.ok{background:#dcfce7;color:#166534}
+    .att-chip.fail{background:#fee2e2;color:var(--err)}
+
+    /* ─── Result card ─── */
     .res{background:var(--card);border-radius:17px;overflow:hidden;
       box-shadow:0 4px 20px rgba(0,0,0,.09);display:none;
       animation:up .4s cubic-bezier(.34,1.56,.64,1)}
     .res.show{display:block}
-    @keyframes up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes up{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 
-    .rh{padding:16px 18px;display:flex;align-items:center;gap:11px;color:#fff}
+    .rh{padding:14px 17px;display:flex;align-items:center;gap:11px;color:#fff}
     .rh.xml{background:linear-gradient(135deg,#2e7d32,#43a047)}
     .rh.bin{background:linear-gradient(135deg,#e65100,#ef6c00)}
     .rh.fail{background:linear-gradient(135deg,#b71c1c,#e53935)}
-    .rico{width:42px;height:42px;background:rgba(255,255,255,.2);border-radius:50%;
-      display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0}
-    .rh h2{font-size:.95rem;font-weight:700}
-    .rh p{font-size:.7rem;opacity:.85;margin-top:1px}
+    .rico{width:40px;height:40px;background:rgba(255,255,255,.2);border-radius:50%;
+      display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+    .rh h2{font-size:.92rem;font-weight:700}
+    .rh p{font-size:.68rem;opacity:.85;margin-top:1px}
 
-    .photo-row{display:flex;padding:14px 18px;gap:14px;
+    .photo-row{display:flex;padding:13px 16px;gap:13px;
       background:#f8f9ff;border-bottom:1px solid var(--bdr);align-items:center}
-    #photoImg{width:72px;height:90px;object-fit:cover;border-radius:8px;
+    #aadhaarPhoto{width:68px;height:85px;object-fit:cover;border-radius:7px;
       border:2px solid var(--bdr);background:#e5e7eb;display:none}
-    .photo-ph{width:72px;height:90px;border-radius:8px;border:2px dashed var(--bdr);
+    .photo-ph{width:68px;height:85px;border-radius:7px;border:2px dashed var(--bdr);
       display:flex;align-items:center;justify-content:center;
-      color:var(--dim);font-size:1.8rem;background:#f9fafb;flex-shrink:0}
-    .uid-info{}
-    .uid-info label{font-size:.64rem;color:var(--dim);font-weight:700;
+      color:var(--dim);font-size:1.7rem;background:#f9fafb;flex-shrink:0}
+    .uid-info label{font-size:.62rem;color:var(--dim);font-weight:700;
       text-transform:uppercase;letter-spacing:.8px}
-    .uid-dig{font-size:1.15rem;font-weight:700;letter-spacing:4px;
+    .uid-dig{font-size:1.1rem;font-weight:700;letter-spacing:4px;
       color:var(--pri);font-family:'Courier New',monospace;margin-top:3px}
-    .uid-ts{font-size:.68rem;color:var(--dim);margin-top:4px}
+    .uid-sub{font-size:.66rem;color:var(--dim);margin-top:3px}
     .uid-ind{display:inline-block;background:#e8eaf6;color:var(--pri);
-      border-radius:4px;padding:1px 6px;font-size:.62rem;font-weight:700;margin-top:4px}
+      border-radius:4px;padding:1px 6px;font-size:.6rem;font-weight:700;margin-top:3px}
     .um{color:var(--dim)}
 
-    .sec{padding:0 16px}
-    .sec-t{font-size:.63rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;
-      color:var(--pri);padding:12px 0 7px;border-bottom:2px solid #e8eaf6;
+    .sec{padding:0 15px}
+    .sec-t{font-size:.61rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;
+      color:var(--pri);padding:11px 0 6px;border-bottom:2px solid #e8eaf6;
       margin-bottom:2px;display:flex;align-items:center;gap:5px}
     .sec-t svg{width:13px;height:13px}
     .fr{display:flex;padding:7px 0;border-bottom:1px solid #f3f4f6;gap:8px}
     .fr:last-child{border-bottom:none}
-    .fk{font-size:.67rem;color:var(--dim);font-weight:500;min-width:110px;flex-shrink:0;padding-top:1px}
-    .fv{font-size:.79rem;font-weight:600;color:var(--txt);word-break:break-word}
+    .fk{font-size:.65rem;color:var(--dim);font-weight:500;min-width:107px;flex-shrink:0;padding-top:1px}
+    .fv{font-size:.78rem;font-weight:600;color:var(--txt);word-break:break-word}
     .fv.na{color:var(--dim);font-weight:400;font-style:italic}
-    .gb{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.69rem;font-weight:700}
-    .gM{background:#dbeafe;color:#1d4ed8}.gF{background:#fce7f3;color:#be185d}.gT{background:#f3e8ff;color:#7c3aed}
+    .gb{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.68rem;font-weight:700}
+    .gM{background:#dbeafe;color:#1d4ed8}.gF{background:#fce7f3;color:#be185d}
+    .gT{background:#f3e8ff;color:#7c3aed}
+    .hash-row{display:flex;padding:6px 0;gap:8px;border-bottom:1px solid #f3f4f6;align-items:flex-start}
+    .hk{font-size:.64rem;color:var(--dim);min-width:107px;flex-shrink:0}
+    .hv{font-size:.6rem;font-family:'Courier New',monospace;color:#374151;
+      word-break:break-all;background:#f3f4f6;padding:3px 6px;border-radius:4px;flex:1}
 
-    .hash-row{display:flex;padding:8px 0;gap:8px;border-bottom:1px solid #f3f4f6}
-    .hk{font-size:.67rem;color:var(--dim);font-weight:500;min-width:110px;flex-shrink:0}
-    .hv{font-size:.62rem;font-family:'Courier New',monospace;color:#374151;word-break:break-all;
-      background:#f3f4f6;padding:3px 6px;border-radius:4px;flex:1}
-
-    .fmt-pill{display:inline-block;font-size:.62rem;font-weight:700;
-      padding:2px 7px;border-radius:20px;margin-left:7px;vertical-align:middle}
-    .fp-xml{background:#c8e6c9;color:#1b5e20}.fp-bin{background:#ffe0b2;color:#bf360c}
-
-    .raw-toggle{margin:9px 16px 0;padding:8px 11px;background:#f8f9ff;
-      border:1px solid #e8eaf6;border-radius:8px;cursor:pointer;
-      font-size:.71rem;color:var(--pri);font-weight:600;
-      display:flex;align-items:center;justify-content:space-between;user-select:none}
-    .raw-pre{margin:5px 16px 0;background:#1e293b;border-radius:8px;padding:11px;
-      font-family:'Courier New',monospace;font-size:.6rem;color:#94a3b8;
+    .raw-toggle{margin:8px 15px 0;padding:7px 10px;background:#f8f9ff;
+      border:1px solid #e8eaf6;border-radius:7px;cursor:pointer;font-size:.69rem;
+      color:var(--pri);font-weight:600;display:flex;align-items:center;
+      justify-content:space-between;user-select:none}
+    .raw-pre{margin:4px 15px 0;background:#1e293b;border-radius:7px;padding:10px;
+      font-family:'Courier New',monospace;font-size:.59rem;color:#94a3b8;
       overflow-x:auto;white-space:pre-wrap;word-break:break-all;
-      display:none;line-height:1.6;max-height:200px}
+      display:none;line-height:1.65;max-height:190px;overflow-y:auto}
     .raw-pre.show{display:block}
     .xt{color:#7dd3fc}.xa{color:#86efac}.xv{color:#fde68a}.xc{color:#fb923c}
-
-    .dbg{margin:9px 16px 0;padding:10px 12px;background:#1e293b;border-radius:8px;
-      font-family:'Courier New',monospace;font-size:.6rem;color:#94a3b8;
+    .dbg{margin:8px 15px 0;padding:9px 11px;background:#1e293b;border-radius:7px;
+      font-family:'Courier New',monospace;font-size:.59rem;color:#94a3b8;
       line-height:1.7;display:none;max-height:220px;overflow-y:auto}
     .dbg.show{display:block}
-    .dbg .dg-ok{color:#86efac}.dbg .dg-err{color:#fca5a5}.dbg .dg-inf{color:#7dd3fc}.dbg .dg-warn{color:#fde68a}
+    .dg-ok{color:#86efac}.dg-err{color:#fca5a5}.dg-inf{color:#7dd3fc}.dg-warn{color:#fde68a}
 
-    .btn-again{display:block;width:calc(100% - 32px);margin:10px 16px 16px;
-      padding:11px;background:var(--pri);color:#fff;border:none;border-radius:10px;
-      font-size:.84rem;font-weight:700;cursor:pointer;transition:background .2s;text-align:center}
+    .fmt-pill{display:inline-block;font-size:.6rem;font-weight:700;
+      padding:1px 6px;border-radius:20px;margin-left:6px;vertical-align:middle}
+    .fp-xml{background:#c8e6c9;color:#1b5e20}.fp-bin{background:#ffe0b2;color:#bf360c}
+
+    .btn-again{display:block;width:calc(100% - 30px);margin:9px 15px 15px;
+      padding:10px;background:var(--pri);color:#fff;border:none;border-radius:9px;
+      font-size:.83rem;font-weight:700;cursor:pointer;text-align:center;transition:background .2s}
     .btn-again:hover{background:#283593}
 
-    .spec-card{background:var(--card);border-radius:16px;padding:16px;
-      margin-top:15px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
-    .spec-card h3{font-size:.84rem;font-weight:700;color:var(--pri);
-      margin-bottom:11px;display:flex;align-items:center;gap:6px}
-    .as{display:flex;gap:9px;margin-bottom:9px}
-    .an{width:22px;height:22px;border-radius:50%;background:var(--pri);color:#fff;
-      font-size:.67rem;font-weight:700;display:flex;align-items:center;justify-content:center;
+    /* ─── Spec / tips ─── */
+    .spec{background:var(--card);border-radius:16px;padding:15px;
+      margin-top:13px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+    .spec h3{font-size:.82rem;font-weight:700;color:var(--pri);
+      margin-bottom:10px;display:flex;align-items:center;gap:6px}
+    .tip{display:flex;gap:9px;margin-bottom:8px}
+    .tipn{width:21px;height:21px;border-radius:50%;background:var(--pri);color:#fff;
+      font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;
       flex-shrink:0;margin-top:1px}
-    .at{font-size:.74rem;color:var(--txt);line-height:1.55}
-    .at strong{color:var(--pri)}
-    .at code{background:#f3f4f6;padding:1px 4px;border-radius:3px;
-      font-size:.69rem;font-family:'Courier New',monospace;color:#374151}
+    .tipt{font-size:.73rem;color:var(--txt);line-height:1.55}
+    .tipt strong{color:var(--pri)}
+    .tipt code{background:#f3f4f6;padding:1px 4px;border-radius:3px;
+      font-size:.67rem;font-family:'Courier New',monospace;color:#374151}
   </style>
 </head>
 <body>
@@ -257,40 +247,32 @@
 <div class="hdr">
   <div class="hdr-ico">🪪</div>
   <div>
-    <h1>Aadhaar QR Code Scanner</h1>
-    <p>Official UIDAI Spec · Old XML + New Secure QR (BigInt + zlib)</p>
+    <h1>Aadhaar QR Scanner</h1>
+    <p>Camera + image upload · Old XML &amp; New Secure QR · Official UIDAI Spec</p>
   </div>
 </div>
 
 <div class="strip">
-  <span class="bge g">Old XML Format</span>
-  <span class="bge r">Secure QR: BigInt → zlib → 0xFF split (ISO-8859-1)</span>
+  <span class="bge g">Old XML</span>
+  <span class="bge r">Secure QR: BigInt→zlib→0xFF→ISO-8859-1</span>
+  <span class="bge o">8-scale scan · ZXing fallback</span>
 </div>
 
 <div class="wrap">
 
-  <div class="msg err" id="msgErr">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-    <span id="errTxt"></span>
-  </div>
-  <div class="msg inf" id="msgInf">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-    <span id="infTxt"></span>
-  </div>
-  <div class="msg warn" id="msgWarn">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-    <span id="warnTxt"></span>
-  </div>
+  <div class="msg err" id="msgErr"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg><span id="errTxt"></span></div>
+  <div class="msg inf" id="msgInf"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><span id="infTxt"></span></div>
+  <div class="msg warn" id="msgWarn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg><span id="warnTxt"></span></div>
 
   <!-- Scanner card -->
   <div class="card" id="scanCard">
     <div class="vp">
       <video id="video" playsinline muted autoplay></video>
-      <canvas id="canvas"></canvas>
+      <canvas id="scanCanvas"></canvas>
       <div class="dimov"></div>
       <div class="fw"><div class="sf"><div class="sl"></div><div class="br"></div><div class="bl"></div></div></div>
       <div class="okflash" id="flash"></div>
-      <div class="stat" id="stat">Press Start Scanning or upload an image</div>
+      <div class="stat" id="stat">Tap Start Scanning or drop an image below</div>
     </div>
 
     <div class="ctrls">
@@ -301,7 +283,7 @@
       <div class="cdv"></div>
       <button class="cb on" id="btnFocus" onclick="toggleFocus()">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm-7 7H3v4h4v-2H5v-2zm14 0v2h-2v2h4v-4h-2zM5 5h2V3H3v4h2V5zm11-2v2h2v2h2V3h-4z"/></svg>
-        <span>Autofocus</span>
+        <span>Focus</span>
       </button>
       <div class="cdv"></div>
       <button class="cb" onclick="stopCamera(true)">
@@ -313,15 +295,36 @@
     <div class="sw">
       <button class="btn" id="btnStart" onclick="startScanner()">
         <div class="sp" id="spin"></div>
-        <span id="btnTxt">📷 Start Scanning</span>
+        <span id="btnTxt">📷 Start Camera Scanning</span>
       </button>
     </div>
 
-    <div class="upload-row">
-      <button class="btn-upload" onclick="document.getElementById('fileInput').click()">
-        🖼️ Upload QR Image / Screenshot
-      </button>
-      <input type="file" id="fileInput" accept="image/*" onchange="handleImageUpload(event)" />
+    <!-- Upload area -->
+    <div class="upload-section">
+      <span class="upload-label">Or upload an Aadhaar image</span>
+      <div class="upload-drop" id="dropZone"
+           ondragover="event.preventDefault();this.classList.add('drag')"
+           ondragleave="this.classList.remove('drag')"
+           ondrop="handleDrop(event)">
+        <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(event)" />
+        <div class="upload-ico">🖼️</div>
+        <div class="upload-txt">Click or drag &amp; drop an image</div>
+        <div class="upload-sub">Photo of Aadhaar card · PDF screenshot · Any QR image</div>
+      </div>
+    </div>
+
+    <!-- Scan progress preview -->
+    <div class="preview-box" id="previewBox">
+      <div class="preview-inner">
+        <img id="previewImg" alt="uploaded" />
+        <div class="preview-info">
+          <div class="preview-name" id="prevName"></div>
+          <div class="preview-dim" id="prevDim"></div>
+          <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+          <div class="prog-label" id="progLabel">Preparing…</div>
+          <div class="scan-attempts" id="attChips"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -329,29 +332,22 @@
   <div class="res" id="resCard">
     <div class="rh" id="resHdr">
       <div class="rico" id="resIco"></div>
-      <div>
-        <h2 id="resTitle"></h2>
-        <p id="resTime"></p>
-      </div>
+      <div><h2 id="resTitle"></h2><p id="resTime"></p></div>
     </div>
 
-    <!-- Photo + UID row -->
     <div class="photo-row">
       <div class="photo-ph" id="photoPh">👤</div>
-      <img id="photoImg" alt="Aadhaar photo" />
+      <img id="aadhaarPhoto" alt="Aadhaar photo" />
       <div class="uid-info">
-        <label>Aadhaar / Reference ID</label>
+        <label>Aadhaar Number</label>
         <div class="uid-dig" id="uidDisp"></div>
-        <div class="uid-ts" id="uidTs"></div>
-        <span class="uid-ind" id="emailMobileInd"></span>
+        <div class="uid-sub" id="uidTs"></div>
+        <span class="uid-ind" id="emailMobileInd" style="display:none"></span>
       </div>
     </div>
 
     <div class="sec">
-      <div class="sec-t">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-        Personal Information
-      </div>
+      <div class="sec-t"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Personal</div>
       <div class="fr"><span class="fk">Full Name</span><span class="fv" id="fName"></span></div>
       <div class="fr"><span class="fk">Gender</span><span class="fv" id="fGender"></span></div>
       <div class="fr"><span class="fk">Date of Birth</span><span class="fv" id="fDob"></span></div>
@@ -360,15 +356,12 @@
     </div>
 
     <div class="sec">
-      <div class="sec-t">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-        Address
-      </div>
+      <div class="sec-t"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>Address</div>
       <div class="fr"><span class="fk">House / Flat</span><span class="fv" id="fHouse"></span></div>
       <div class="fr"><span class="fk">Street</span><span class="fv" id="fStreet"></span></div>
       <div class="fr"><span class="fk">Landmark</span><span class="fv" id="fLm"></span></div>
       <div class="fr"><span class="fk">Locality</span><span class="fv" id="fLoc"></span></div>
-      <div class="fr"><span class="fk">Village/Town/City</span><span class="fv" id="fVtc"></span></div>
+      <div class="fr"><span class="fk">Village / Town</span><span class="fv" id="fVtc"></span></div>
       <div class="fr"><span class="fk">Post Office</span><span class="fv" id="fPo"></span></div>
       <div class="fr"><span class="fk">Sub-District</span><span class="fv" id="fSd"></span></div>
       <div class="fr"><span class="fk">District</span><span class="fv" id="fDist"></span></div>
@@ -377,264 +370,340 @@
     </div>
 
     <div class="sec" id="hashSec" style="display:none">
-      <div class="sec-t">🔐 Hashes (from QR)</div>
-      <div class="hash-row"><span class="hk">Mobile hash</span><span class="hv" id="mobileHash">—</span></div>
-      <div class="hash-row"><span class="hk">Email hash</span><span class="hv" id="emailHash">—</span></div>
+      <div class="sec-t">🔐 Hash Data</div>
+      <div class="hash-row"><span class="hk">Mobile hash</span><span class="hv" id="mobileHash"></span></div>
+      <div class="hash-row"><span class="hk">Email hash</span><span class="hv" id="emailHash"></span></div>
     </div>
 
-    <div style="height:8px"></div>
-
-    <div class="raw-toggle" onclick="toggleDbg()">
-      <span>🔧 Debug / Parse Log</span><span id="dbgArr">▼</span>
-    </div>
+    <div style="height:6px"></div>
+    <div class="raw-toggle" onclick="toggleDbg()"><span>🔧 Debug / Parse Log</span><span id="dbgArr">▼</span></div>
     <div class="dbg" id="dbgPanel"></div>
-
-    <div class="raw-toggle" style="margin-top:6px" onclick="toggleRaw()">
-      <span>📄 Raw Segments</span><span id="rawArr">▼</span>
-    </div>
+    <div class="raw-toggle" style="margin-top:5px" onclick="toggleRaw()"><span>📄 Raw Segments</span><span id="rawArr">▼</span></div>
     <pre class="raw-pre" id="rawPre"></pre>
-
-    <button class="btn-again" onclick="resetScanner()">🔄 Scan Another QR Code</button>
+    <button class="btn-again" onclick="resetScanner()">🔄 Scan Another</button>
   </div>
 
-  <!-- How it works -->
-  <div class="spec-card">
-    <h3>⚙️ Official UIDAI Secure QR Algorithm</h3>
-
-    <div class="as"><div class="an">1</div>
-      <div class="at"><strong>QR scan → decimal string</strong><br>
-        jsQR reads the NUMERIC-mode QR → gives you a 500–700 digit decimal number string.</div>
+  <!-- Tips -->
+  <div class="spec">
+    <h3>📋 Tips for best results</h3>
+    <div class="tip"><div class="tipn">1</div>
+      <div class="tipt"><strong>Use a clear, flat photo</strong> — Aadhaar card on a dark background, QR fully visible, no glare or shadow over the QR</div>
     </div>
-    <div class="as"><div class="an">2</div>
-      <div class="at"><strong>BigInt → byte array</strong><br>
-        <code>BigInt(str)</code> → extract big-endian bytes with right-shift loop until 0.</div>
+    <div class="tip"><div class="tipn">2</div>
+      <div class="tipt"><strong>Higher resolution = better</strong> — Aadhaar Secure QR is very dense (177×177 cells). Scanner tries 8 different zoom levels automatically</div>
     </div>
-    <div class="as"><div class="an">3</div>
-      <div class="at"><strong>ZLIB decompress</strong> ← the key missing step<br>
-        Raw bytes are zlib-compressed. <code>pako.inflate(bytes)</code> decompresses them.
-        Without this step you get garbage like "pEy", "PW0554ZRS".</div>
+    <div class="tip"><div class="tipn">3</div>
+      <div class="tipt"><strong>Try the e-Aadhaar PDF screenshot</strong> — screenshot from mAadhaar app or UIDAI portal gives the best image quality</div>
     </div>
-    <div class="as"><div class="an">4</div>
-      <div class="at"><strong>Split by byte value 255 (0xFF) → ISO-8859-1 strings</strong><br>
-        Fields: <code>[0]</code> email/mobile indicator → <code>[1]</code> refId →
-        <code>[2]</code> name → <code>[3]</code> DOB → <code>[4]</code> gender →
-        <code>[5]</code> careOf → <code>[6]</code> district → <code>[7]</code> landmark →
-        <code>[8]</code> house → <code>[9]</code> location → <code>[10]</code> pincode →
-        <code>[11]</code> postOffice → <code>[12]</code> state → <code>[13]</code> street →
-        <code>[14]</code> subDistrict → <code>[15]</code> VTC</div>
-    </div>
-    <div class="as"><div class="an">5</div>
-      <div class="at"><strong>Photo + hashes + signature (from end)</strong><br>
-        After VTC: JPEG2000 photo (variable). From end: 256B RSA signature +
-        32B mobile hash + 32B email hash (per indicator). Photo displayed inline.</div>
+    <div class="tip"><div class="tipn">4</div>
+      <div class="tipt"><strong>Algorithm</strong>: QR scan → decimal string → <code>BigInt</code> → bytes → <code>pako.inflate</code> (zlib) → split by <code>0xFF</code> → ISO-8859-1 strings → 16 fields</div>
     </div>
   </div>
 </div>
 
 <script>
 /*
- * ══════════════════════════════════════════════════════════════════
- * OFFICIAL UIDAI SECURE QR ALGORITHM (from UIDAI Spec Version 0)
- *
- * Step 1: QR → decimal string (NUMERIC mode)
- * Step 2: BigInt(decimalStr) → big-endian byte array
- * Step 3: pako.inflate(bytes) → decompress zlib
- * Step 4: split decompressed by 0xFF → ISO-8859-1 strings
- * Step 5: extract 16 fields (indicator, refId, name, dob, gender, ...)
- * ══════════════════════════════════════════════════════════════════
+ * ═══════════════════════════════════════════════════════════════════
+ * QR DETECTION STRATEGY
+ *  Aadhaar Secure QR ≈ version 40 (177×177 modules) — very dense
+ *  jsQR needs ≥2px/module = ≥354px QR area
+ *  Strategy:
+ *    Pass 1-8:  jsQR at scales [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25]
+ *    Pass 9:    jsQR with grayscale + contrast enhancement
+ *    Pass 10:   ZXing MultiFormatReader (same as Android APK)
+ *    Pass 11:   ZXing with inverted image
+ * ═══════════════════════════════════════════════════════════════════
  */
 
 let stream = null, scanning = false, rafId = null;
 let flashOn = false, afOn = true, vTrack = null;
 let rawOpen = false, dbgOpen = false;
 
-const video   = document.getElementById('video');
-const canvas  = document.getElementById('canvas');
-const ctx     = canvas.getContext('2d', { willReadFrequently: true });
-const statEl  = document.getElementById('stat');
-const flashEl = document.getElementById('flash');
+const video  = document.getElementById('video');
+const canvas = document.getElementById('scanCanvas');
+const ctx    = canvas.getContext('2d', { willReadFrequently: true });
+const statEl = document.getElementById('stat');
+const flash  = document.getElementById('flash');
+
+// Scales to try — we go LARGE first because Aadhaar QR needs high res
+const SCALES = [4, 3, 2, 1.5, 1, 0.75, 0.5, 0.25];
 
 window.addEventListener('load', () => {
-  if (typeof jsQR === 'undefined') showErr('jsQR failed to load. Check internet and refresh.');
-  if (typeof pako === 'undefined') showErr('pako (zlib) failed to load. Check internet and refresh.');
+  if (typeof jsQR  === 'undefined') showErr('jsQR failed to load. Check internet.');
+  if (typeof pako  === 'undefined') showErr('pako (zlib) failed to load. Check internet.');
 });
 
-// ─── Camera ───────────────────────────────────────────────────────
+// ─── Camera ────────────────────────────────────────────────────────
 async function startScanner() {
   if (scanning) return;
   hideMsg(); setLoading(true);
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
     vTrack = stream.getVideoTracks()[0];
     scanning = true;
-    statEl.textContent = 'Point at Aadhaar QR Code';
+    statEl.textContent = 'Point camera at Aadhaar QR Code';
     setLoading(false); setBtnState('scanning');
-    tick();
-  } catch (err) {
+    tickCamera();
+  } catch (e) {
     setLoading(false);
-    if (err.name === 'NotAllowedError')
-      showErr('Camera permission denied. Try uploading an image instead.');
-    else if (err.name === 'NotFoundError')
-      showErr('No camera. Use upload button below.');
-    else
-      showErr('Camera error: ' + err.message);
+    const msg = e.name === 'NotAllowedError'
+      ? 'Camera permission denied — use the upload option below instead.'
+      : e.name === 'NotFoundError'
+      ? 'No camera found — use the upload option below.'
+      : 'Camera error: ' + e.message;
+    showErr(msg);
   }
 }
 
-function tick() {
+function tickCamera() {
   if (!scanning) return;
   if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(id.data, id.width, id.height, { inversionAttempts: 'attemptBoth' });
     if (code) {
       scanning = false; cancelAnimationFrame(rafId);
-      flashEl.classList.add('on'); setTimeout(() => flashEl.classList.remove('on'), 400);
-      statEl.textContent = '✅ QR Found! Parsing…';
+      doFlash(); statEl.textContent = '✅ Found! Parsing…';
       parseQR(code.data, code.binaryData);
       return;
     }
   }
-  rafId = requestAnimationFrame(tick);
+  rafId = requestAnimationFrame(tickCamera);
 }
 
-// ─── Image upload ─────────────────────────────────────────────────
-function handleImageUpload(evt) {
-  const file = evt.target.files[0];
-  if (!file) return;
+// ─── File upload handlers ──────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) processFile(file);
+  else showWarn('Please drop an image file (JPG, PNG, etc.)');
+}
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+  e.target.value = '';
+}
+
+// ─── Process uploaded image ────────────────────────────────────────
+function processFile(file) {
   hideMsg(); stopCamera(false);
-  statEl.textContent = '🖼️ Processing image…';
+  showPreview(file);
+  const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
-    canvas.width = img.width; canvas.height = img.height;
-    ctx.drawImage(img, 0, 0);
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
-    if (code) {
-      flashEl.classList.add('on'); setTimeout(() => flashEl.classList.remove('on'), 400);
-      parseQR(code.data, code.binaryData);
-    } else {
-      statEl.textContent = 'No QR code found in image';
-      showWarn('No QR code detected. Make sure the QR is clearly visible and unobstructed.');
-      setBtnState('idle');
-    }
+    document.getElementById('prevDim').textContent =
+      `${img.naturalWidth} × ${img.naturalHeight}px`;
+    scanImageAllScales(img, file.name, url);
   };
-  img.onerror = () => showErr('Could not load the image file.');
-  img.src = URL.createObjectURL(file);
-  evt.target.value = '';
+  img.onerror = () => { showErr('Could not load image.'); hidePreview(); };
+  img.src = url;
 }
 
-// ══════════════════════════════════════════════════════════════════
-// MAIN PARSER — tries all known Aadhaar QR formats
-// ══════════════════════════════════════════════════════════════════
+// ─── Multi-scale + multi-method scanning ──────────────────────────
+async function scanImageAllScales(img, filename, url) {
+  const chips = document.getElementById('attChips');
+  const fill  = document.getElementById('progFill');
+  const label = document.getElementById('progLabel');
+
+  const W = img.naturalWidth, H = img.naturalHeight;
+
+  // Build attempt list: jsQR at multiple scales + grayscale + ZXing
+  const attempts = SCALES.map(s => ({ label: `${s}x`, scale: s, method: 'jsqr', grey: false }));
+  attempts.push({ label: 'grey', scale: 1, method: 'jsqr', grey: true });
+  attempts.push({ label: 'grey2x', scale: 2, method: 'jsqr', grey: true });
+  if (typeof ZXing !== 'undefined') {
+    attempts.push({ label: 'ZXing', scale: 1, method: 'zxing', grey: false });
+    attempts.push({ label: 'ZXing↑', scale: 2, method: 'zxing', grey: false });
+  }
+
+  // Render chips
+  chips.innerHTML = attempts.map((a, i) =>
+    `<span class="att-chip pending" id="chip${i}">${a.label}</span>`
+  ).join('');
+
+  let found = null;
+  for (let i = 0; i < attempts.length; i++) {
+    const a = attempts[i];
+    const pct = Math.round((i / attempts.length) * 100);
+    fill.style.width = pct + '%';
+    label.textContent = `Trying ${a.label} (${pct}%)…`;
+    document.getElementById('chip' + i).className = 'att-chip pending';
+    statEl.textContent = `Scanning at ${a.label}…`;
+
+    // Yield to browser to update UI
+    await new Promise(r => setTimeout(r, 10));
+
+    try {
+      const scaledW = Math.min(Math.round(W * a.scale), 6000);
+      const scaledH = Math.min(Math.round(H * a.scale), 6000);
+      canvas.width = scaledW; canvas.height = scaledH;
+      ctx.drawImage(img, 0, 0, scaledW, scaledH);
+
+      let imgData = ctx.getImageData(0, 0, scaledW, scaledH);
+
+      if (a.grey) imgData = toGrayscale(imgData);
+
+      let code = null;
+      if (a.method === 'jsqr') {
+        code = jsQR(imgData.data, scaledW, scaledH, { inversionAttempts: 'attemptBoth' });
+      } else if (a.method === 'zxing') {
+        code = tryZXing(canvas);
+      }
+
+      if (code) {
+        document.getElementById('chip' + i).className = 'att-chip ok';
+        fill.style.width = '100%';
+        label.textContent = `✅ QR found at ${a.label}!`;
+        doFlash();
+        found = code;
+        break;
+      } else {
+        document.getElementById('chip' + i).className = 'att-chip fail';
+      }
+    } catch (e) {
+      document.getElementById('chip' + i).className = 'att-chip fail';
+    }
+  }
+
+  URL.revokeObjectURL(url);
+
+  if (found) {
+    statEl.textContent = '✅ Parsing QR data…';
+    parseQR(found.data || found.text || '', found.binaryData || null);
+  } else {
+    fill.style.width = '100%';
+    label.textContent = '❌ No QR detected in any attempt';
+    statEl.textContent = 'No QR code found';
+    showErr(
+      'No QR code detected after ' + attempts.length + ' scan attempts. ' +
+      'Make sure the QR code is: (1) fully visible and unobstructed, ' +
+      '(2) the image is in focus and not blurry, ' +
+      '(3) the Aadhaar QR (black/white grid pattern) is in the photo. ' +
+      'Try a screenshot from the mAadhaar app or UIDAI portal for best results.'
+    );
+    setBtnState('idle');
+  }
+}
+
+// Convert ImageData to grayscale (improves detection on some images)
+function toGrayscale(imgData) {
+  const d = new Uint8ClampedArray(imgData.data);
+  for (let i = 0; i < d.length; i += 4) {
+    const g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+    // Boost contrast: stretch to 0-255
+    const c = Math.min(255, Math.max(0, (g - 128) * 1.4 + 128));
+    d[i] = d[i+1] = d[i+2] = c;
+  }
+  return new ImageData(d, imgData.width, imgData.height);
+}
+
+// ZXing fallback (same library used by the Android APK via ZXing Java)
+function tryZXing(cvs) {
+  try {
+    const reader = new ZXing.MultiFormatReader();
+    reader.setHints(new Map([[ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.QR_CODE]]]));
+    const lum = new ZXing.HTMLCanvasElementLuminanceSource(cvs);
+    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+    const result = reader.decode(bmp);
+    // ZXing returns result.getText() and result.getRawBytes()
+    return { data: result.getText(), binaryData: result.getRawBytes() };
+  } catch(e) {
+    // ZXing throws NotFoundException when not found — not an error
+    return null;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// MAIN PARSER — all 3 Aadhaar QR formats
+// ═════════════════════════════════════════════════════════════════════
 const dbgLines = [];
 
 function parseQR(rawStr, binaryData) {
   dbgLines.length = 0;
   const raw = (rawStr || '').trim();
-  dbg('inf', `QR detected. data=${raw.length} chars, binaryData=${binaryData ? binaryData.length : 0} bytes`);
-  dbg('inf', `data preview: "${raw.slice(0, 100)}"`);
+  dbg('inf', `Raw length: ${raw.length} chars | binaryData: ${binaryData ? binaryData.length : 0} bytes`);
+  dbg('inf', `Preview: "${raw.slice(0, 80)}"`);
 
-  // ── FORMAT A: Old XML ──────────────────────────────────────────
-  dbg('inf', '─── Trying Format A: Old XML ───');
+  // ── A: Old XML ──────────────────────────────────────────────────
+  dbg('inf', '─── Format A: Old XML ───');
   if (tryXml(raw)) return;
 
-  // ── FORMAT B: Official UIDAI Secure QR (numeric mode) ─────────
-  // The official spec says: convert base-10 → BigInt → bytes → inflate → split 0xFF
-  dbg('inf', '─── Trying Format B: UIDAI Secure QR (BigInt + zlib) ───');
+  // ── B: Official UIDAI Secure QR (numeric → BigInt → zlib → 0xFF) ─
+  dbg('inf', '─── Format B: UIDAI Secure QR (BigInt+zlib) ───');
   if (/^\d+$/.test(raw) && raw.length > 20) {
-    dbg('ok', `Numeric string detected (${raw.length} digits)`);
-    const bytes = bigIntToBytes(raw);
-    if (bytes) {
-      dbg('inf', `Bytes: ${bytes.length} raw. First 6: ${Array.from(bytes.slice(0,6)).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
-      // Try zlib inflate (required per UIDAI spec)
-      let decompressed = null;
+    dbg('ok', `Numeric string: ${raw.length} digits`);
+    const rawBytes = bigIntToBytes(raw);
+    if (rawBytes) {
+      dbg('inf', `Converted to ${rawBytes.length} bytes. First 8: ${hexStr(rawBytes, 8)}`);
+      // Try zlib inflate (required by spec)
       try {
-        decompressed = pako.inflate(bytes);
-        dbg('ok', `ZLIB inflate: ${bytes.length} → ${decompressed.length} bytes`);
-        if (trySecureQR(decompressed, 'SECURE-NUMERIC')) return;
-      } catch (e) {
-        dbg('warn', `ZLIB inflate failed: ${e.message}. Trying raw bytes without decompression…`);
-        // Maybe already decompressed or different compression
-        if (trySecureQR(bytes, 'SECURE-NOZIP')) return;
+        const dec = pako.inflate(rawBytes);
+        dbg('ok', `zlib inflate: ${rawBytes.length} → ${dec.length} bytes`);
+        if (trySecureQR(dec, 'B-zip')) return;
+      } catch(e) {
+        dbg('warn', `zlib failed: ${e.message} — trying raw bytes`);
+        if (trySecureQR(rawBytes, 'B-raw')) return;
       }
     }
-  } else {
-    dbg('inf', 'Not a pure numeric string — skipping Format B');
   }
 
-  // ── FORMAT C: Byte-mode QR — binaryData directly ──────────────
-  dbg('inf', '─── Trying Format C: Byte-mode binaryData ───');
+  // ── C: Byte-mode binaryData ─────────────────────────────────────
+  dbg('inf', '─── Format C: Byte-mode binaryData ───');
   if (binaryData && binaryData.length > 20) {
     const arr = binaryData instanceof Uint8Array ? binaryData : new Uint8Array(binaryData);
-    dbg('inf', `binaryData: ${arr.length} bytes. First 6: ${Array.from(arr.slice(0,6)).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
-    // Try inflate first
+    dbg('inf', `binaryData: ${arr.length} bytes. First 8: ${hexStr(arr, 8)}`);
     try {
       const dec = pako.inflate(arr);
-      dbg('ok', `ZLIB inflate binaryData: ${arr.length} → ${dec.length} bytes`);
-      if (trySecureQR(dec, 'SECURE-BIN-ZIP')) return;
+      dbg('ok', `zlib inflate binaryData: ${arr.length} → ${dec.length} bytes`);
+      if (trySecureQR(dec, 'C-zip')) return;
     } catch(e) {
       dbg('warn', `binaryData inflate failed: ${e.message}`);
-      if (trySecureQR(arr, 'SECURE-BIN')) return;
+      if (trySecureQR(arr, 'C-raw')) return;
     }
   }
 
-  // ── FORMAT D: Regex fallback ───────────────────────────────────
-  dbg('inf', '─── Trying Format D: attribute regex ───');
+  // ── D: Regex ────────────────────────────────────────────────────
+  dbg('inf', '─── Format D: Regex ───');
   if (tryRegex(raw)) return;
 
-  // ── Failed ────────────────────────────────────────────────────
   dbg('err', 'All formats failed.');
-  showWarn('QR scanned but no Aadhaar format matched. See debug panel below.');
+  showWarn('QR code read but no Aadhaar format matched. See debug panel.');
   renderResult({}, 'fail', null, true);
 }
 
-// ══════════════════════════════════════════════════════════════════
-// FORMAT A: Old XML — <PrintLetterBarcodeData .../>
-// ══════════════════════════════════════════════════════════════════
+// ── Format A: Old XML ──────────────────────────────────────────────
 function tryXml(raw) {
   if (!raw.includes('PrintLetterBarcodeData') && !raw.trim().startsWith('<')) {
     dbg('inf', 'No XML indicators'); return false;
   }
   try {
-    let xmlStr = raw.trim();
-    const idx = xmlStr.indexOf('<PrintLetterBarcodeData');
-    if (idx > 0) xmlStr = xmlStr.slice(idx);
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xmlStr, 'text/xml');
-    if (doc.querySelector('parsererror')) {
-      dbg('err', 'XML parse error: ' + doc.querySelector('parsererror').textContent.slice(0,100));
-      return false;
-    }
+    let x = raw.trim();
+    const idx = x.indexOf('<PrintLetterBarcodeData');
+    if (idx > 0) x = x.slice(idx);
+    const doc = new DOMParser().parseFromString(x, 'text/xml');
+    if (doc.querySelector('parsererror')) { dbg('err', 'XML parse error'); return false; }
     const el = doc.querySelector('PrintLetterBarcodeData');
-    if (!el || !el.getAttribute('uid')) { dbg('err', 'PrintLetterBarcodeData or uid missing'); return false; }
-
-    dbg('ok', `Format A matched! uid=${el.getAttribute('uid')}`);
-    const f = {
-      uid:ga(el,'uid'), name:ga(el,'name'), gender:ga(el,'gender'),
-      yob:ga(el,'yob'), dob:ga(el,'dob'), co:ga(el,'co'),
-      house:ga(el,'house'), street:ga(el,'street'), lm:ga(el,'lm'),
-      loc:ga(el,'loc'), vtc:ga(el,'vtc'), po:ga(el,'po'),
-      dist:ga(el,'dist'), subdist:ga(el,'subdist'),
-      state:ga(el,'state'), pc:ga(el,'pc'), country:ga(el,'country'),
-    };
+    if (!el || !el.getAttribute('uid')) { dbg('err', 'PrintLetterBarcodeData/uid missing'); return false; }
+    dbg('ok', `Format A! uid=${el.getAttribute('uid')}`);
+    const f = { uid:ga(el,'uid'), name:ga(el,'name'), gender:ga(el,'gender'),
+      yob:ga(el,'yob'), dob:ga(el,'dob'), co:ga(el,'co'), house:ga(el,'house'),
+      street:ga(el,'street'), lm:ga(el,'lm'), loc:ga(el,'loc'), vtc:ga(el,'vtc'),
+      po:ga(el,'po'), dist:ga(el,'dist'), subdist:ga(el,'subdist'),
+      state:ga(el,'state'), pc:ga(el,'pc'), country:ga(el,'country') };
     renderResult(f, 'xml', null);
     return true;
-  } catch(e) { dbg('err', 'XML exception: ' + e.message); return false; }
+  } catch(e) { dbg('err', 'XML exception: '+e.message); return false; }
 }
 function ga(el,a){return(el.getAttribute(a)||'').trim();}
 
-// ══════════════════════════════════════════════════════════════════
-// Convert decimal string → big-endian Uint8Array via BigInt
-// Required by UIDAI Spec Step 1+2: "Convert base10 → BigInteger → byte array"
-// ══════════════════════════════════════════════════════════════════
+// ── BigInt decimal → big-endian Uint8Array ─────────────────────────
 function bigIntToBytes(numStr) {
   try {
     let n = BigInt(numStr);
@@ -642,390 +711,288 @@ function bigIntToBytes(numStr) {
     const bytes = [];
     while (n > 0n) { bytes.unshift(Number(n & 0xFFn)); n >>= 8n; }
     return new Uint8Array(bytes);
-  } catch(e) { dbg('err', 'BigInt failed: ' + e.message); return null; }
+  } catch(e) { dbg('err', 'BigInt: '+e.message); return null; }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// FORMAT B/C: Official UIDAI Secure QR — split decompressed bytes by 0xFF
-//
-// Official field order (UIDAI Spec Section 3.1):
-//   [0]  email_mobile_present_bit_indicator  (0/1/2/3)
-//   [1]  referenceId  (last4UID + DDMMYYYYHHMMSSsss)
-//   [2]  name
-//   [3]  date of birth
-//   [4]  gender
-//   [5]  care of
-//   [6]  district
-//   [7]  landmark
-//   [8]  house
-//   [9]  location
-//   [10] pin code
-//   [11] post office
-//   [12] state
-//   [13] street
-//   [14] sub district
-//   [15] VTC
-//   then JPEG2000 photo, then email hash (32B), mobile hash (32B), signature (256B)
-// ══════════════════════════════════════════════════════════════════
+// ── Format B/C: UIDAI Secure QR — split decompressed by 0xFF ───────
+// Official field order per UIDAI Spec Section 3.1:
+//  [0] indicator  [1] refId  [2] name  [3] dob  [4] gender
+//  [5] careOf  [6] district  [7] landmark  [8] house  [9] location
+//  [10] pinCode  [11] postOffice  [12] state  [13] street
+//  [14] subDistrict  [15] VTC  → then photo bytes → hashes → sig
 function trySecureQR(bytes, tag) {
   try {
-    // Spec says use ISO-8859-1 encoding for field strings
     const dec = new TextDecoder('iso-8859-1');
-
     const segs = [];
     let cur = [];
-    // Find the end of text data: scan for last 0xFF before photo
-    // We split ALL bytes by 0xFF — segments 0..15 are text, 16+ are binary (photo/hashes/sig)
     for (let i = 0; i < bytes.length; i++) {
-      if (bytes[i] === 0xFF) { segs.push(cur); cur = []; }
+      if (bytes[i] === 0xFF) { segs.push([...cur]); cur = []; }
       else cur.push(bytes[i]);
     }
-    if (cur.length) segs.push(cur);
+    if (cur.length) segs.push([...cur]);
 
     dbg('inf', `[${tag}] Split → ${segs.length} segments`);
-    segs.slice(0, 18).forEach((s, i) => {
-      const txt = dec.decode(new Uint8Array(s));
-      const clean = txt.replace(/[\x00-\x1f\x7f]/g, '·');
-      dbg('inf', `  seg[${i}] (${s.length}B): "${clean.slice(0, 60)}"`);
+    segs.slice(0, 17).forEach((s, i) => {
+      const t = dec.decode(new Uint8Array(s)).replace(/[\x00-\x1f\x7f]/g,'·');
+      dbg('inf', `  [${i}] ${s.length}B: "${t.slice(0,60)}"`);
     });
 
-    // Need at least 16 text segments for a valid Aadhaar Secure QR
-    if (segs.length < 16) {
-      dbg('err', `[${tag}] Only ${segs.length} segments — need ≥16 for Secure QR`);
-      return false;
+    if (segs.length < 16) { dbg('err', `Only ${segs.length} segs, need ≥16`); return false; }
+
+    const s = segs.map(b => dec.decode(new Uint8Array(b)));
+    const indicator = s[0].trim();
+    const refId     = s[1].trim();
+    const name      = s[2].trim();
+    const dob       = s[3].trim();
+    const gender    = s[4].trim();
+    const co        = s[5].trim();
+    const dist      = s[6].trim();
+    const lm        = s[7].trim();
+    const house     = s[8].trim();
+    const loc       = s[9].trim();
+    const pc        = s[10].trim();
+    const po        = s[11].trim();
+    const state     = s[12].trim();
+    const street    = s[13].trim();
+    const subdist   = s[14].trim();
+    const vtc       = s[15].trim();
+
+    // Validate: name must contain letters
+    if (!name || !/[a-zA-Z\u0900-\u097F]/.test(name)) {
+      dbg('err', `[${tag}] name empty or non-letter: "${name}"`); return false;
     }
 
-    const segStr = segs.map(s => dec.decode(new Uint8Array(s)));
-
-    const indicator = (segStr[0] || '').trim(); // "0","1","2","3"
-    const refId     = (segStr[1] || '').trim();
-    const name      = (segStr[2] || '').trim();
-    const dob       = (segStr[3] || '').trim();
-    const gender    = (segStr[4] || '').trim();
-    const co        = (segStr[5] || '').trim();
-    const dist      = (segStr[6] || '').trim();
-    const lm        = (segStr[7] || '').trim();
-    const house     = (segStr[8] || '').trim();
-    const loc       = (segStr[9] || '').trim();
-    const pc        = (segStr[10] || '').trim();
-    const po        = (segStr[11] || '').trim();
-    const state     = (segStr[12] || '').trim();
-    const street    = (segStr[13] || '').trim();
-    const subdist   = (segStr[14] || '').trim();
-    const vtc       = (segStr[15] || '').trim();
-
-    // Validate: name must be non-empty printable text
-    if (!name || !/[a-zA-Z]/.test(name)) {
-      dbg('err', `[${tag}] name="${name}" is empty or non-alpha — not valid`);
-      return false;
-    }
-
-    dbg('ok', `[${tag}] SUCCESS! ind="${indicator}" refId="${refId}" name="${name}" dob="${dob}" gender="${gender}"`);
+    dbg('ok', `[${tag}] SUCCESS! name="${name}" dob="${dob}" gender="${gender}"`);
 
     // Extract year from DOB
     let yob = '';
-    if (dob) {
-      const parts = dob.split(/[-\/\. ]/);
-      if (parts.length === 3) {
-        yob = parts[2].length === 4 ? parts[2] : parts[0].length === 4 ? parts[0] : '';
-      }
-    }
+    if (dob) { const p = dob.split(/[-\/. ]/); yob = p.length===3 ? (p[2].length===4?p[2]:p[0].length===4?p[0]:'') : ''; }
 
-    // Extract email/mobile hashes and photo from binary portion
-    // Signature: last 256 bytes
-    // Mobile hash: before sig, 32 bytes (if indicator 2 or 3)
-    // Email hash: before mobile hash, 32 bytes (if indicator 1 or 3)
-    // Photo: everything between seg[15] end and hashes start
+    // Email/mobile indicator
     const ind = parseInt(indicator) || 0;
-    const emailPresent  = (ind === 1 || ind === 3);
-    const mobilePresent = (ind === 2 || ind === 3);
-    dbg('inf', `Indicator ${ind}: email=${emailPresent}, mobile=${mobilePresent}`);
+    const emailP  = ind === 1 || ind === 3;
+    const mobileP = ind === 2 || ind === 3;
 
-    // Rebuild flat byte position of end of seg[15]
+    // Calculate photo range
+    // After seg[15] end: photo starts
+    // From END: 256B sig, 32B mobile hash (if mobileP), 32B email hash (if emailP)
     let pos = 0;
-    for (let i = 0; i <= 15; i++) { pos += segs[i].length; if (i < 15) pos += 1; } // +1 for 0xFF
-    // The byte at 'pos' is the 0xFF after seg[15], then photo starts at pos+1
-    const photoStart = pos + 1;
-    const sigSize = 256;
-    const sigStart = bytes.length - sigSize;
-    let hashEnd = sigStart;
-    const mobileHashStart = mobilePresent ? hashEnd - 32 : null;
-    const emailHashStart  = emailPresent  ? (mobilePresent ? mobileHashStart - 32 : hashEnd - 32) : null;
-    const photoEnd = emailHashStart !== null ? emailHashStart : (mobileHashStart !== null ? mobileHashStart : sigStart);
+    for (let i = 0; i <= 15; i++) { pos += segs[i].length; if (i < 15) pos++; }
+    const photoStart = pos + 1; // +1 for the 0xFF after seg[15]
+    const sigStart   = bytes.length - 256;
+    const mHash      = mobileP ? bytes.slice(sigStart - 32, sigStart) : null;
+    const eHash      = emailP  ? bytes.slice(sigStart - (mobileP?64:32), sigStart - (mobileP?32:0)) : null;
+    const photoEnd   = eHash ? (sigStart - (mobileP?64:32)) : mHash ? sigStart - 32 : sigStart;
 
-    dbg('inf', `Photo bytes: ${photoStart} → ${photoEnd} (${photoEnd - photoStart} bytes)`);
-    dbg('inf', `Signature: ${sigStart} → ${bytes.length} (${sigSize} bytes)`);
+    const mobileHashHex = mHash ? Array.from(mHash).map(b=>b.toString(16).padStart(2,'0')).join('') : '';
+    const emailHashHex  = eHash ? Array.from(eHash).map(b=>b.toString(16).padStart(2,'0')).join('') : '';
 
-    // Extract mobile hash
-    let mobileHashHex = '', emailHashHex = '';
-    if (mobileHashStart !== null && mobileHashStart >= 0) {
-      const mhBytes = bytes.slice(mobileHashStart, mobileHashStart + 32);
-      mobileHashHex = Array.from(mhBytes).map(b=>b.toString(16).padStart(2,'0')).join('');
-      dbg('inf', `Mobile hash: ${mobileHashHex.slice(0,16)}…`);
-    }
-    if (emailHashStart !== null && emailHashStart >= 0) {
-      const ehBytes = bytes.slice(emailHashStart, emailHashStart + 32);
-      emailHashHex = Array.from(ehBytes).map(b=>b.toString(16).padStart(2,'0')).join('');
-      dbg('inf', `Email hash: ${emailHashHex.slice(0,16)}…`);
-    }
-
-    // Extract photo (JPEG2000)
+    // Photo
     let photoUrl = null;
-    if (photoStart < photoEnd && photoEnd > photoStart + 100) {
+    if (photoStart < photoEnd && photoEnd - photoStart > 50) {
       const photoBytes = bytes.slice(photoStart, photoEnd);
-      const blob = new Blob([photoBytes], { type: 'image/jp2' });
+      dbg('inf', `Photo: ${photoBytes.length} bytes. Magic: ${hexStr(photoBytes, 4)}`);
+      // JPEG2000 magic: 0000000C6A502020 or FF4FFF51
+      const blob = new Blob([photoBytes], { type: 'image/jpeg' }); // try as JPEG first
       photoUrl = URL.createObjectURL(blob);
-      // Also try image/jpeg in case it's JFIF embedded in JPEG2000
     }
 
-    // Extract refId parts: last 4 of Aadhaar + DDMMYYYYHHMMSSsss
-    let uidLast4 = '', timestamp = '';
-    if (refId.length >= 4) {
-      uidLast4 = refId.slice(0, 4);  // first 4 chars = last 4 of Aadhaar
-      timestamp = refId.slice(4);    // rest = timestamp DDMMYYYYHHMMSSsss
+    // Parse refId: first 4 = last 4 of UID, rest = DDMMYYYYHHMMSSsss
+    const uidLast4 = refId.slice(0, 4);
+    const ts = refId.slice(4);
+    let tsFormatted = '';
+    if (ts.length >= 12) {
+      tsFormatted = `Data as on ${ts.slice(0,2)}/${ts.slice(2,4)}/${ts.slice(4,8)} ${ts.slice(8,10)}:${ts.slice(10,12)}`;
     }
 
-    const f = {
-      uid: uidLast4 || refId,
-      name, dob, gender, yob, co,
-      house, street, lm, loc, vtc,
-      po, dist, subdist, state, pc,
-      country: 'India',
-      refId, indicator: ind,
-      mobileHashHex, emailHashHex,
-      photoUrl,
-      timestamp
-    };
+    const f = { uid:uidLast4||refId, name, dob, gender, yob, co,
+      house, street, lm, loc, vtc, po, dist, subdist, state, pc, country:'India',
+      refId, indicator:ind, mobileHashHex, emailHashHex, photoUrl, tsFormatted };
 
-    const rawDisplay = buildSegmentDisplay(segStr, tag, bytes.length);
-    renderResult(f, 'bin', rawDisplay);
+    renderResult(f, 'bin', buildSegDisplay(s, tag, bytes.length));
     return true;
-  } catch(e) {
-    dbg('err', `[${tag}] Exception: ${e.message}\n${e.stack ? e.stack.slice(0,200) : ''}`);
-    return false;
-  }
+  } catch(e) { dbg('err', `[${tag}] ${e.message}`); return false; }
 }
 
-// ─── Format D: Regex fallback ────────────────────────────────────
+// ── Format D: regex ────────────────────────────────────────────────
 function tryRegex(raw) {
-  if (!raw.includes('uid=') && !raw.includes('name=')) return false;
-  const pick = a => { const m = raw.match(new RegExp(a + '="([^"]*)"')); return m ? m[1].trim() : ''; };
+  if (!raw.includes('uid=')) return false;
+  const pick = a => { const m = raw.match(new RegExp(a+'="([^"]*)"')); return m?m[1].trim():''; };
   const uid = pick('uid'); if (!uid) return false;
-  dbg('ok', 'Regex fallback matched uid=' + uid);
-  const f = { uid, name:pick('name'), gender:pick('gender'), yob:pick('yob'), dob:pick('dob'),
-    co:pick('co'), house:pick('house'), street:pick('street'), lm:pick('lm'),
-    loc:pick('loc'), vtc:pick('vtc'), po:pick('po'), dist:pick('dist'),
-    subdist:pick('subdist'), state:pick('state'), pc:pick('pc'), country:pick('country') };
-  renderResult(f, 'xml', null);
-  return true;
+  dbg('ok', 'Regex uid='+uid);
+  const f = {uid,name:pick('name'),gender:pick('gender'),yob:pick('yob'),dob:pick('dob'),
+    co:pick('co'),house:pick('house'),street:pick('street'),lm:pick('lm'),loc:pick('loc'),
+    vtc:pick('vtc'),po:pick('po'),dist:pick('dist'),subdist:pick('subdist'),state:pick('state'),
+    pc:pick('pc'),country:pick('country')};
+  renderResult(f,'xml',null); return true;
 }
 
-// ══════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════
 // RENDER RESULT
-// ══════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════
 function renderResult(f, fmt, rawDisplay, failed) {
   stopCamera(false);
 
-  // Header
   document.getElementById('resHdr').className = 'rh ' + fmt;
-  document.getElementById('resIco').textContent = failed ? '⚠️' : (fmt === 'xml' ? '✅' : '🔐');
+  document.getElementById('resIco').textContent = failed?'⚠️':(fmt==='xml'?'✅':'🔐');
   document.getElementById('resTitle').innerHTML =
-    (failed ? 'Parse Failed' : (fmt==='xml' ? 'Old XML Format' : 'Secure QR Decoded')) +
-    (fmt !== 'fail' ? `<span class="fmt-pill fp-${fmt==='xml'?'xml':'bin'}">${fmt==='xml'?'XML':'Secure'}</span>` : '');
+    (failed?'Parse Failed':(fmt==='xml'?'Old XML Format':'UIDAI Secure QR')) +
+    (!failed?`<span class="fmt-pill fp-${fmt==='xml'?'xml':'bin'}">${fmt==='xml'?'XML':'Secure'}</span>`:'');
   document.getElementById('resTime').textContent =
-    'Decoded ' + new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    'Decoded ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 
-  // UID display
-  const uid = (f.uid || '').replace(/\D/g,'');
-  const last4 = uid.length >= 4 ? uid.slice(-4) : (f.uid || '').slice(-4);
+  // UID
+  const uid = (f.uid||'').replace(/\D/g,'');
+  const last4 = uid.length>=4?uid.slice(-4):(f.uid||'').slice(-4);
   document.getElementById('uidDisp').innerHTML =
-    `<span class="um">✱✱✱✱ ✱✱✱✱ </span>${last4 || '—'}`;
+    `<span class="um">✱✱✱✱ ✱✱✱✱ </span>${last4||'—'}`;
+  document.getElementById('uidTs').textContent = f.tsFormatted || (f.refId?'Ref: '+f.refId:'');
 
-  // Timestamp from refId
-  const ts = f.timestamp || '';
-  if (ts.length >= 8) {
-    const day=ts.slice(0,2), mon=ts.slice(2,4), yr=ts.slice(4,8), hr=ts.slice(8,10), mi=ts.slice(10,12);
-    document.getElementById('uidTs').textContent = `Data as on ${day}/${mon}/${yr} ${hr}:${mi}`;
-  } else {
-    document.getElementById('uidTs').textContent = f.refId ? `Ref: ${f.refId}` : '';
-  }
-
-  // Email/mobile indicator
-  const indMap = {0:'No mobile/email',1:'Email only',2:'Mobile only',3:'Mobile + Email'};
   const indEl = document.getElementById('emailMobileInd');
-  if (f.indicator !== undefined) {
-    indEl.textContent = indMap[f.indicator] || '';
-    indEl.style.display = '';
-  } else {
-    indEl.style.display = 'none';
-  }
+  const indMap = {0:'No mobile/email in QR',1:'Email only',2:'Mobile only',3:'Mobile + Email'};
+  if (f.indicator !== undefined) { indEl.textContent = indMap[f.indicator]||''; indEl.style.display=''; }
+  else indEl.style.display='none';
 
   // Photo
-  const photoPh = document.getElementById('photoPh');
-  const photoImg = document.getElementById('photoImg');
+  const ph = document.getElementById('photoPh'), pi = document.getElementById('aadhaarPhoto');
   if (f.photoUrl) {
-    photoImg.src = f.photoUrl;
-    photoImg.style.display = 'block';
-    photoPh.style.display = 'none';
-  } else {
-    photoImg.style.display = 'none';
-    photoPh.style.display = 'flex';
-  }
+    pi.src = f.photoUrl; pi.style.display='block'; ph.style.display='none';
+    pi.onerror = () => { pi.style.display='none'; ph.style.display='flex'; };
+  } else { pi.style.display='none'; ph.style.display='flex'; }
 
   // Gender badge
-  const gMap = {M:'Male',F:'Female',T:'Transgender'};
-  const gEl = document.getElementById('fGender');
-  if (f.gender && gMap[f.gender]) {
-    gEl.innerHTML = `<span class="gb g${f.gender}">${gMap[f.gender]}</span>`;
-  } else { setF(gEl, f.gender); }
+  const gMap={M:'Male',F:'Female',T:'Transgender'};
+  const gEl=document.getElementById('fGender');
+  if(f.gender&&gMap[f.gender]) gEl.innerHTML=`<span class="gb g${f.gender}">${gMap[f.gender]}</span>`;
+  else setF(gEl,f.gender);
 
-  setF(document.getElementById('fName'),    f.name);
-  setF(document.getElementById('fDob'),     f.dob);
-  setF(document.getElementById('fYob'),     f.yob);
-  setF(document.getElementById('fCo'),      f.co);
-  setF(document.getElementById('fHouse'),   f.house);
-  setF(document.getElementById('fStreet'),  f.street);
-  setF(document.getElementById('fLm'),      f.lm);
-  setF(document.getElementById('fLoc'),     f.loc);
-  setF(document.getElementById('fVtc'),     f.vtc);
-  setF(document.getElementById('fPo'),      f.po);
-  setF(document.getElementById('fSd'),      f.subdist);
-  setF(document.getElementById('fDist'),    f.dist);
-  setF(document.getElementById('fState'),   f.state);
-  setF(document.getElementById('fPin'),     f.pc);
+  setF(document.getElementById('fName'),f.name);
+  setF(document.getElementById('fDob'),f.dob);
+  setF(document.getElementById('fYob'),f.yob);
+  setF(document.getElementById('fCo'),f.co);
+  setF(document.getElementById('fHouse'),f.house);
+  setF(document.getElementById('fStreet'),f.street);
+  setF(document.getElementById('fLm'),f.lm);
+  setF(document.getElementById('fLoc'),f.loc);
+  setF(document.getElementById('fVtc'),f.vtc);
+  setF(document.getElementById('fPo'),f.po);
+  setF(document.getElementById('fSd'),f.subdist);
+  setF(document.getElementById('fDist'),f.dist);
+  setF(document.getElementById('fState'),f.state);
+  setF(document.getElementById('fPin'),f.pc);
 
-  // Hashes section
-  const hashSec = document.getElementById('hashSec');
-  if (f.mobileHashHex || f.emailHashHex) {
-    hashSec.style.display = '';
-    document.getElementById('mobileHash').textContent = f.mobileHashHex || '—';
-    document.getElementById('emailHash').textContent  = f.emailHashHex  || '—';
-  } else {
-    hashSec.style.display = 'none';
-  }
+  const hs = document.getElementById('hashSec');
+  if (f.mobileHashHex||f.emailHashHex) {
+    hs.style.display='';
+    document.getElementById('mobileHash').textContent = f.mobileHashHex||'—';
+    document.getElementById('emailHash').textContent  = f.emailHashHex||'—';
+  } else hs.style.display='none';
 
-  // Debug + raw
-  document.getElementById('rawPre').innerHTML = rawDisplay || '—';
+  document.getElementById('rawPre').innerHTML = rawDisplay||'—';
   document.getElementById('dbgPanel').innerHTML =
-    dbgLines.map(l => `<span class="dg-${l.t}">${escHtml(l.m)}</span>`).join('\n');
+    dbgLines.map(l=>`<span class="dg-${l.t}">${esc(l.m)}</span>`).join('\n');
 
-  if (failed || dbgLines.some(l => l.t === 'err')) {
+  if (failed||dbgLines.some(l=>l.t==='err')) {
     document.getElementById('dbgPanel').classList.add('show');
-    document.getElementById('dbgArr').textContent = '▲';
-    dbgOpen = true;
+    document.getElementById('dbgArr').textContent='▲'; dbgOpen=true;
   }
 
-  document.getElementById('scanCard').style.display = 'none';
+  hidePreview();
+  document.getElementById('scanCard').style.display='none';
   document.getElementById('resCard').classList.add('show');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 
-function setF(el, val) {
-  const v = (val || '').trim();
-  if (v) { el.textContent = v; el.className = 'fv'; }
-  else   { el.textContent = 'Not available'; el.className = 'fv na'; }
-}
-
-function buildSegmentDisplay(segs, tag, totalBytes) {
-  const fieldNames = ['indicator','referenceId','name','dob','gender','careOf',
-    'district','landmark','house','location','pinCode','postOffice',
-    'state','street','subDistrict','VTC','[photo+hashes+sig]'];
-  const lines = [
-    `<span class="xc">// UIDAI Secure QR — ${tag} | ${totalBytes} decompressed bytes | ${segs.length} segments</span>`,
-    ''
-  ];
-  segs.slice(0, 17).forEach((s, i) => {
-    const label = fieldNames[i] || `extra[${i}]`;
-    const clean = s.replace(/[\x00-\x1f\x7f]/g, '·');
-    lines.push(`<span class="xa">seg[${i}] ${label}</span> = <span class="xv">"${escHtml(clean.slice(0, 100))}"</span>`);
-  });
+function setF(el,v){const t=(v||'').trim();if(t){el.textContent=t;el.className='fv';}else{el.textContent='Not available';el.className='fv na';}}
+function buildSegDisplay(s, tag, total) {
+  const names=['indicator','referenceId','name','dob','gender','careOf','district','landmark','house','location','pinCode','postOffice','state','street','subDistrict','VTC'];
+  const lines=[`<span class="xc">// ${tag} | ${total}B decompressed | ${s.length} segs</span>`,``];
+  s.slice(0,16).forEach((v,i)=>lines.push(`<span class="xa">seg[${i}] ${names[i]||'?'}</span>=<span class="xv">"${esc(v.replace(/[\x00-\x1f\x7f]/g,'·').slice(0,90))}"</span>`));
   return lines.join('\n');
 }
+function hexStr(arr, n) { return Array.from(arr.slice?arr.slice(0,n):Array.from(arr).slice(0,n)).map(b=>b.toString(16).padStart(2,'0')).join(' '); }
+function dbg(t,m){dbgLines.push({t,m});}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-function dbg(t, m) { dbgLines.push({ t, m }); }
-function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// ─── Preview UI ────────────────────────────────────────────────────
+function showPreview(file) {
+  const box = document.getElementById('previewBox');
+  const img = document.getElementById('previewImg');
+  const url = URL.createObjectURL(file);
+  img.src = url; img.onload = () => URL.revokeObjectURL(url);
+  document.getElementById('prevName').textContent = file.name;
+  document.getElementById('prevDim').textContent = `${Math.round(file.size/1024)}KB`;
+  document.getElementById('progFill').style.width = '0%';
+  document.getElementById('progLabel').textContent = 'Preparing…';
+  document.getElementById('attChips').innerHTML = '';
+  box.classList.add('show');
+  document.getElementById('msgErr').classList.remove('show');
+}
+function hidePreview() { document.getElementById('previewBox').classList.remove('show'); }
 
-// ─── Flash / Focus ─────────────────────────────────────────────────
+// ─── Camera / flash / focus ────────────────────────────────────────
 async function toggleFlash() {
-  if (!vTrack) { showInf('Start scanner first.'); return; }
-  const caps = vTrack.getCapabilities ? vTrack.getCapabilities() : {};
-  if (!caps.torch) { showInf('Flash not supported on this device.'); return; }
+  if (!vTrack) { showInf('Start camera first.'); return; }
+  const caps = vTrack.getCapabilities?vTrack.getCapabilities():{};
+  if (!caps.torch) { showInf('Flash not supported.'); return; }
   flashOn = !flashOn;
-  try {
-    await vTrack.applyConstraints({ advanced: [{ torch: flashOn }] });
-    document.getElementById('btnFlash').classList.toggle('on', flashOn);
-    document.getElementById('flashLbl').textContent = flashOn ? 'Flash ON' : 'Flash';
-  } catch(e) { flashOn = !flashOn; showErr('Flash error: ' + e.message); }
+  await vTrack.applyConstraints({advanced:[{torch:flashOn}]}).catch(()=>{flashOn=!flashOn;});
+  document.getElementById('btnFlash').classList.toggle('on',flashOn);
+  document.getElementById('flashLbl').textContent = flashOn?'Flash ON':'Flash';
 }
 async function toggleFocus() {
-  if (!vTrack) return; afOn = !afOn;
-  document.getElementById('btnFocus').classList.toggle('on', afOn);
-  try {
-    const caps = vTrack.getCapabilities ? vTrack.getCapabilities() : {};
-    if (caps.focusMode) await vTrack.applyConstraints({ advanced: [{ focusMode: afOn ? 'continuous' : 'manual' }] });
-  } catch(e) {}
+  afOn=!afOn;
+  document.getElementById('btnFocus').classList.toggle('on',afOn);
+  if (vTrack) {
+    const caps = vTrack.getCapabilities?vTrack.getCapabilities():{};
+    if (caps.focusMode) await vTrack.applyConstraints({advanced:[{focusMode:afOn?'continuous':'manual'}]}).catch(()=>{});
+  }
 }
-
-// ─── Camera stop / reset ──────────────────────────────────────────
+function doFlash() { flash.classList.add('on'); setTimeout(()=>flash.classList.remove('on'),400); }
 function stopCamera(resetUI) {
-  scanning = false; cancelAnimationFrame(rafId);
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; vTrack = null; }
-  video.srcObject = null;
-  if (resetUI) { setBtnState('idle'); statEl.textContent = 'Camera stopped'; }
+  scanning=false; cancelAnimationFrame(rafId);
+  if (stream){stream.getTracks().forEach(t=>t.stop());stream=null;vTrack=null;}
+  video.srcObject=null;
+  if (resetUI){setBtnState('idle');statEl.textContent='Camera stopped.';}
 }
 function resetScanner() {
   document.getElementById('resCard').classList.remove('show');
-  document.getElementById('scanCard').style.display = 'block';
-  setBtnState('idle');
-  statEl.textContent = 'Press Start Scanning or upload an image';
-  rawOpen = false; dbgOpen = false;
+  document.getElementById('scanCard').style.display='block';
+  setBtnState('idle'); statEl.textContent='Tap Start Scanning or drop an image below';
+  rawOpen=false;dbgOpen=false;
   document.getElementById('rawPre').classList.remove('show');
   document.getElementById('dbgPanel').classList.remove('show');
-  document.getElementById('rawArr').textContent = '▼';
-  document.getElementById('dbgArr').textContent = '▼';
-  const photoImg = document.getElementById('photoImg');
-  if (photoImg.src) { URL.revokeObjectURL(photoImg.src); photoImg.src = ''; }
-  document.getElementById('photoPh').style.display = 'flex';
-  document.getElementById('photoImg').style.display = 'none';
-  hideMsg(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.getElementById('rawArr').textContent='▼'; document.getElementById('dbgArr').textContent='▼';
+  const pi=document.getElementById('aadhaarPhoto');
+  if(pi.src){URL.revokeObjectURL(pi.src);pi.src='';}
+  document.getElementById('photoPh').style.display='flex';
+  pi.style.display='none';
+  hidePreview(); hideMsg(); window.scrollTo({top:0,behavior:'smooth'});
 }
-function toggleRaw() {
-  rawOpen = !rawOpen;
-  document.getElementById('rawPre').classList.toggle('show', rawOpen);
-  document.getElementById('rawArr').textContent = rawOpen ? '▲' : '▼';
-}
-function toggleDbg() {
-  dbgOpen = !dbgOpen;
-  document.getElementById('dbgPanel').classList.toggle('show', dbgOpen);
-  document.getElementById('dbgArr').textContent = dbgOpen ? '▲' : '▼';
-}
+function toggleRaw(){rawOpen=!rawOpen;document.getElementById('rawPre').classList.toggle('show',rawOpen);document.getElementById('rawArr').textContent=rawOpen?'▲':'▼';}
+function toggleDbg(){dbgOpen=!dbgOpen;document.getElementById('dbgPanel').classList.toggle('show',dbgOpen);document.getElementById('dbgArr').textContent=dbgOpen?'▲':'▼';}
 
-// ─── UI helpers ───────────────────────────────────────────────────
-function setLoading(on) {
-  document.getElementById('btnStart').classList.toggle('loading', on);
-  document.getElementById('spin').style.display = on ? 'block' : 'none';
-  document.getElementById('btnTxt').textContent  = on ? 'Starting Camera…' : '📷 Start Scanning';
-  document.getElementById('btnStart').disabled   = on;
+// ─── UI state ──────────────────────────────────────────────────────
+function setLoading(on){
+  document.getElementById('btnStart').classList.toggle('loading',on);
+  document.getElementById('spin').style.display=on?'block':'none';
+  document.getElementById('btnTxt').textContent=on?'Starting…':'📷 Start Camera Scanning';
+  document.getElementById('btnStart').disabled=on;
 }
-function setBtnState(s) {
+function setBtnState(s){
   document.getElementById('btnStart').classList.remove('loading');
-  document.getElementById('spin').style.display = 'none';
-  document.getElementById('btnStart').disabled = (s === 'scanning');
-  document.getElementById('btnTxt').textContent = s === 'scanning' ? '🔍 Scanning…' : '📷 Start Scanning';
+  document.getElementById('spin').style.display='none';
+  document.getElementById('btnStart').disabled=(s==='scanning');
+  document.getElementById('btnTxt').textContent=s==='scanning'?'🔍 Scanning…':'📷 Start Camera Scanning';
 }
-function showErr(m)  { d('msgErr','errTxt',m); }
-function showInf(m)  { d('msgInf','infTxt',m); }
-function showWarn(m) { d('msgWarn','warnTxt',m); }
-function d(mid, tid, m) {
-  ['msgErr','msgInf','msgWarn'].forEach(id => document.getElementById(id).classList.remove('show'));
-  document.getElementById(tid).textContent = m;
-  document.getElementById(mid).classList.add('show');
-}
-function hideMsg() { ['msgErr','msgInf','msgWarn'].forEach(id => document.getElementById(id).classList.remove('show')); }
+function showErr(m){_msg('msgErr','errTxt',m);}
+function showInf(m){_msg('msgInf','infTxt',m);}
+function showWarn(m){_msg('msgWarn','warnTxt',m);}
+function _msg(mid,tid,m){['msgErr','msgInf','msgWarn'].forEach(id=>document.getElementById(id).classList.remove('show'));document.getElementById(tid).textContent=m;document.getElementById(mid).classList.add('show');}
+function hideMsg(){['msgErr','msgInf','msgWarn'].forEach(id=>document.getElementById(id).classList.remove('show'));}
 
-if (location.protocol !== 'https:' && !['localhost','127.0.0.1'].includes(location.hostname)) {
-  showWarn('Camera requires HTTPS. Use the upload button, or open from an https:// URL.');
-}
+if(location.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(location.hostname))
+  showWarn('Camera requires HTTPS. The upload option works on any connection.');
 </script>
 </body>
 </html>
