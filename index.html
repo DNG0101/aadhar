@@ -794,8 +794,9 @@ async function tryScanImageAttempts(img) {
             code = {data: code.data || code.text || '', binaryData: strToBytes(code.data || code.text || '')};
           }
         } else if (a.method === 'zxing') {
+          // tryZXingAsync now returns {data, binaryData} via zxingResultToCode —
+          // binaryData already has getRawBytes() bytes; do NOT overwrite it.
           code = await tryZXingAsync(sc);
-          if (code) code = {data: code.data, binaryData: strToBytes(code.data || '')};
         }
       }
 
@@ -813,6 +814,20 @@ async function tryScanImageAttempts(img) {
   return null;
 }
 
+// Extract raw bytes from a ZXing Result — getRawBytes() returns the actual
+// QR payload bytes (byte-mode) without any charset re-encoding.
+function zxingResultToCode(result) {
+  if (!result) return null;
+  let rawBytes = null;
+  try {
+    const rb = result.getRawBytes ? result.getRawBytes() : null;
+    if (rb && rb.length) rawBytes = new Uint8Array(rb);
+  } catch(e) {}
+  // getText() with ISO-8859-1 hint preserves bytes 0x80–0xFF faithfully
+  const text = result.getText ? result.getText() : '';
+  return {data: text, binaryData: rawBytes || strToBytes(text)};
+}
+
 function tryZXing(cvs) {
   if (typeof ZXing === 'undefined') return null;
   try {
@@ -825,10 +840,13 @@ function tryZXing(cvs) {
         const hints = new Map();
         hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.QR_CODE]);
         hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        // CRITICAL: tell ZXing to treat byte-mode segments as ISO-8859-1 (Latin-1).
+        // Without this, ZXing JS may re-encode as UTF-8, corrupting bytes 0x80–0xFF.
+        try { hints.set(ZXing.DecodeHintType.CHARACTER_SET, 'ISO-8859-1'); } catch(e) {}
         reader.setHints(hints);
       }
       const result = reader.decode(bitmap);
-      if (result) return {data: result.getText(), binaryData: null};
+      return zxingResultToCode(result);
     }
   } catch(e) { if (e?.name !== 'NotFoundException') dbg('warn', 'ZXing: ' + e.message); }
   return null;
@@ -839,9 +857,18 @@ async function tryZXingAsync(cvs) {
   try {
     const r = tryZXing(cvs); if (r) return r;
     if (ZXing.BrowserQRCodeReader) {
-      const reader = new ZXing.BrowserQRCodeReader();
+      const hints = new Map();
+      try {
+        if (ZXing.DecodeHintType) {
+          hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+          hints.set(ZXing.DecodeHintType.CHARACTER_SET, 'ISO-8859-1');
+        }
+      } catch(e) {}
+      const reader = hints.size
+        ? new ZXing.BrowserQRCodeReader(hints)
+        : new ZXing.BrowserQRCodeReader();
       const result = await reader.decodeFromCanvas(cvs);
-      if (result) return {data: result.getText(), binaryData: null};
+      return zxingResultToCode(result);
     }
   } catch(e) { if (e?.name !== 'NotFoundException') dbg('warn', 'ZXingAsync: ' + e.message); }
   return null;
@@ -857,12 +884,35 @@ function toGrey(id) {
   return new ImageData(d, id.width, id.height);
 }
 
-// FIX: helper — extract raw bytes from a string using charCodeAt (Latin-1/ISO-8859-1 safe)
+// Helper: extract raw bytes from a string using charCodeAt (Latin-1 / ISO-8859-1 safe)
 function strToBytes(s) {
   if (!s) return null;
   const b = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i) & 0xFF;
   return b;
+}
+
+// ─── CRITICAL FIX: tryInflateAll ─────────────────────────────
+// Android ZXing Inflater(nowrap=true) = raw deflate; Inflater(nowrap=false) = zlib.
+// pako.inflate  → expects zlib wrapper (0x78 xx header)
+// pako.inflateRaw → expects raw deflate (no header / no checksum)
+// We must try BOTH, and also try stripping a leading 0x00 sign byte that
+// Java's BigInteger.toByteArray() sometimes prepends (two's-complement sign extension).
+function tryInflateAll(bytes, tag) {
+  const variants = [bytes];
+  // If first byte is 0x00 and length > 1, also try without the sign byte
+  if (bytes[0] === 0x00 && bytes.length > 1) variants.push(bytes.slice(1));
+  // Conversely, if zlib magic is at bytes[1] try both offsets
+  if (bytes.length > 1 && bytes[1] === 0x78) variants.push(bytes.slice(1));
+
+  for (const v of variants) {
+    // 1. Standard zlib (0x78 xx header)
+    try { const d = pako.inflate(v); dbg('ok', `${tag} inflate ok ${v.length}→${d.length}B`); return d; } catch(e) {}
+    // 2. Raw deflate (no wrapper) — covers Inflater(nowrap=true) on Android
+    try { const d = pako.inflateRaw(v); dbg('ok', `${tag} inflateRaw ok ${v.length}→${d.length}B`); return d; } catch(e) {}
+  }
+  dbg('warn', `${tag} all inflate variants failed`);
+  return null;
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -878,51 +928,44 @@ function parseQR(raw, binary) {
   if (tryXML(s)) return;
 
   // ── Format B: Numeric string → BigInt → bytes ─────────────
+  // UIDAI Secure QR encodes a big-endian BigInteger as a decimal digit string.
+  // We also try stripping a leading 0x00 byte that Java BigInteger.toByteArray()
+  // sometimes prepends as a two's-complement sign byte.
   if (/^\d+$/.test(s) && s.length > 20) {
     dbg('ok', `Numeric: ${s.length} digits`);
     const bytes = bigToBytes(s);
     if (bytes) {
       dbg('inf', `Bytes: ${bytes.length}B. First 8: ${h8(bytes)}`);
-      try {
-        const dec = pako.inflate(bytes);
-        dbg('ok', `zlib: ${bytes.length}→${dec.length}B`);
-        if (trySecure(dec, 'B-zip')) return;
-      } catch(e) {
-        dbg('warn', 'zlib fail: ' + e.message);
-        if (trySecure(bytes, 'B-raw')) return;
-      }
+      const dec = tryInflateAll(bytes, 'B');
+      if (dec) { if (trySecure(dec, 'B-inflate')) return; }
+      // Inflate failed — try raw bytes as-is (uncompressed payload, rare but seen in test QRs)
+      if (trySecure(bytes, 'B-raw')) return;
     }
   }
 
-  // ── Format C: Binary bytes from jsQR binaryData ───────────
+  // ── Format C: Raw bytes from jsQR/ZXing binaryData ────────
+  // jsQR returns binaryData as Uint8Array of the exact QR payload bytes.
+  // For numeric-mode QR, these are ASCII digit bytes — also try inflating them
+  // directly in case they represent a different encoding than Format B.
   if (binary && binary.length > 20) {
     const arr = binary instanceof Uint8Array ? binary : new Uint8Array(binary);
     dbg('inf', `Binary: ${arr.length}B. First 8: ${h8(arr)}`);
-    try {
-      const d = pako.inflate(arr);
-      dbg('ok', 'zlib bin ok');
-      if (trySecure(d, 'C-zip')) return;
-    } catch(e) {
-      dbg('warn', 'bin zlib fail');
-      if (trySecure(arr, 'C-raw')) return;
-    }
+    const dec = tryInflateAll(arr, 'C');
+    if (dec) { if (trySecure(dec, 'C-inflate')) return; }
+    if (trySecure(arr, 'C-raw')) return;
   }
 
-  // ── FIX Format D: String charCodes → bytes ────────────────
-  // Handles binary-mode QR decoded as a string by BarcodeDetector / QrScanner.
-  // The raw string bytes (ISO-8859-1) ARE the actual payload bytes in this case.
+  // ── Format D: String charCodes → bytes ────────────────────
+  // Covers BarcodeDetector / QrScanner returning a binary-mode QR as a string.
+  // charCodeAt & 0xFF faithfully reproduces Latin-1 byte values.
+  // Only run for non-digit strings to avoid redundancy with Format B.
   if (s.length > 20 && !/^\d+$/.test(s)) {
     const strBytes = strToBytes(s);
     if (strBytes) {
       dbg('inf', `Str-bytes: ${strBytes.length}B. First 8: ${h8(strBytes)}`);
-      try {
-        const dec = pako.inflate(strBytes);
-        dbg('ok', `str-zlib: ${strBytes.length}→${dec.length}B`);
-        if (trySecure(dec, 'D-str-zip')) return;
-      } catch(e) {
-        dbg('warn', 'str-zlib fail: ' + e.message);
-        if (trySecure(strBytes, 'D-str-raw')) return;
-      }
+      const dec = tryInflateAll(strBytes, 'D');
+      if (dec) { if (trySecure(dec, 'D-inflate')) return; }
+      if (trySecure(strBytes, 'D-raw')) return;
     }
   }
 
