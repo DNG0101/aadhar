@@ -967,10 +967,20 @@ function trySecure(bytes, tag) {
     }
 
     const uidLast4 = refId.slice(0, 4);
-    const ts       = refId.slice(4);
-    let tsStr = '';
-    if (ts.length >= 12)
-      tsStr = `Data as on ${ts.slice(0,2)}/${ts.slice(2,4)}/${ts.slice(4,8)} ${ts.slice(8,10)}:${ts.slice(10,12)}`;
+    const ts = refId.slice(4);
+let tsStr = '';
+
+if (ts.length >= 12) {
+
+  // Try YYYYMMDDHHMM format
+  const year  = ts.slice(0,4);
+  const month = ts.slice(4,6);
+  const day   = ts.slice(6,8);
+  const hour  = ts.slice(8,10);
+  const min   = ts.slice(10,12);
+
+  tsStr = `Data as on ${day}/${month}/${year} ${hour}:${min}`;
+}
 
     const f = {
       uid: uidLast4 || refId, name, dob, gender, yob, co, house, street, lm,
