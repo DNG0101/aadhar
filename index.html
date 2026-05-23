@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Aadhaar QR Scanner v3</title>
+<title>Aadhaar QR Scanner</title>
 <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
@@ -218,7 +218,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
   z-index:1000;align-items:center;justify-content:center}
 .overlay.show{display:flex}
 .overlay img{max-width:90vw;max-height:90vh;border-radius:10px;cursor:pointer}
-/* verified mobile row highlight */
+/* verified contact row */
 .mob-verified-row{background:#f0fdf4;border-radius:6px;padding:4px 0}
 </style>
 </head>
@@ -227,8 +227,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 <div class="hdr">
   <div class="hdr-ico">🪪</div>
   <div>
-    <h1>Aadhaar QR Scanner v3</h1>
-    <p>Official UIDAI Spec · Binary indicator fix · Full-res camera · Version prefix fix · v3</p>
+    <h1>Aadhaar QR Scanner</h1>
+    <p>Official UIDAI Spec · Photo · Mobile Verification · Camera + Upload</p>
   </div>
 </div>
 <div class="pills">
@@ -332,12 +332,14 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
       <div class="row"><span class="rk">State</span><span class="rv" id="fState"></span></div>
       <div class="row"><span class="rk">PIN Code</span><span class="rv" id="fPin"></span></div>
     </div>
-    <!-- Mobile verified display row - shown after successful verification -->
+
+    <!-- Verified contact section — shown after successful mobile/email verification -->
     <div class="sec" id="verifiedMobSec" style="display:none">
       <div class="stitle">📱 Verified Contact</div>
       <div class="row mob-verified-row"><span class="rk">Mobile Number</span><span class="rv verified" id="verifiedMobNum"></span></div>
       <div class="row" id="verifiedEmailRow" style="display:none"><span class="rk">Email Address</span><span class="rv verified" id="verifiedEmailAddr"></span></div>
     </div>
+
     <div class="vsec" id="vMobile" style="display:none">
       <div class="vtitle">📱 Verify Mobile Number</div>
       <div class="vinput-row">
@@ -374,7 +376,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
     <div class="tip"><div class="tipn">1</div><div class="tipt"><strong>Camera uses native BarcodeDetector API</strong> on Android Chrome / Samsung Browser / Safari iOS 17+ — hardware-accelerated, decodes Aadhaar QR in under 200ms. Falls back to jsQR if unavailable.</div></div>
     <div class="tip"><div class="tipn">2</div><div class="tipt"><strong>Upload uses QrScanner (ZXing TRY_HARDER)</strong> as primary — handles 177×177 Version-40 dense QR in a single pass without multi-scale loops</div></div>
     <div class="tip"><div class="tipn">3</div><div class="tipt"><strong>Photo</strong> — stored as JPEG2000 (JP2) inside the QR. Decoded via embedded PDF engine. Click photo to enlarge</div></div>
-    <div class="tip"><div class="tipn">4</div><div class="tipt"><strong>Mobile verification</strong> — SHA-256 applied N times (N = last digit of Aadhaar UID per UIDAI spec). Tries iterations 1–9 exhaustively. Verified number shown on card.</div></div>
+    <div class="tip"><div class="tipn">4</div><div class="tipt"><strong>Mobile verification</strong> — SHA-256 applied N times (N = last digit of Aadhaar UID per UIDAI spec). Tries iterations 1–9 exhaustively. Supports +91/91 prefixes. Verified number shown on card.</div></div>
   </div>
 </div>
 
@@ -384,30 +386,30 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-//  AADHAAR QR SCANNER — Fixed Version
+//  AADHAAR QR SCANNER — Merged & Fixed
 //
-//  FIXES APPLIED (v2 — deep APK + spec analysis):
-//  1. DECOMPRESSION: Try pako.ungzip() FIRST (gzip magic 1f 8b),
-//     then pako.inflate(), then raw — critical for binary QR data
-//  2. CAMERA: Fixed detecting flag race condition; jsQR fallback
-//     always runs when BarcodeDetector is busy
-//  3. DRAG & DROP: Relaxed file type check (accepts empty type),
-//     stopPropagation added, robust event handling
-//  4. MOBILE VERIFICATION: Now works because decompression is
-//     fixed → indicator correctly reads 2 or 3 → hash extracted
-//  5. VERIFIED DISPLAY: After successful verification, mobile/email
-//     number shown prominently on result card
-//  6. QR BINARY PATH (v2): Path D — raw string treated as byte array
-//     This is the PRIMARY fix for binary Aadhaar Secure QR not being
-//     decoded. jsQR returns binary data as code.data string, code.binaryData
-//     doesn't exist → Path C (binary param) was always null → parse failed.
-//     Now: detect binary bytes in raw string, convert to Uint8Array, decompress.
-//  7. jsQR CHUNKS (v2): extractChunkBytes() reads code.chunks[i].bytes
-//     for byte-mode QR — more reliable than code.data string conversion.
-//  8. INDICATOR AMBIGUITY (v2): UIDAI spec sections 2.2 and 3.2 contradict
-//     each other (1=email vs 1=mobile). When single hash (indicator=1 or 2),
-//     both mobile AND email verification sections are shown with the same hash.
-//  9. REVERSED HASH (v2): Also try reversed byte order as fallback in verify.
+//  BASE: "right code" structure, modules, and all parsing logic
+//
+//  MOBILE VERIFICATION (ported from v3 "wrong code"):
+//  • decompressBytes(): gzip-first (pako.ungzip), then zlib, then
+//    raw — critical since UIDAI Secure QR uses GZIP (magic 1f 8b)
+//  • Indicator fix: reads raw binary byte from segs[0][0], not
+//    parseInt of ISO-decoded string (was always giving NaN → 0)
+//  • Indicator ambiguity: when ind=1 or 2, hash stored in BOTH
+//    gMobileHash and gEmailHash so user can verify either
+//  • verifyMobile(): strips +91/91/0091, tries uid4 salt variants,
+//    tries reversed hash bytes as fallback
+//  • showVerifiedContact(): displays verified number/email on card
+//
+//  CAMERA SPEED FIX (ported from v3):
+//  • BarcodeDetector non-blocking: when detecting=true, run jsQR
+//    on same frame instead of wasting it
+//  • jsqrFrame(): 960px pass + full-res every 3rd frame + 1.5x
+//    upscale every 8th frame — catches dense Aadhaar QRs reliably
+//  • extractChunkBytes(): reads jsQR code.chunks[i].bytes for
+//    byte-mode QR (binary path for non-numeric Secure QR)
+//  • Path D: raw string → bytes conversion for binary QR where
+//    jsQR/BarcodeDetector returns binary data as JS string
 // ═══════════════════════════════════════════════════════════════
 
 if (typeof pdfjsLib !== 'undefined') {
@@ -443,12 +445,12 @@ function getAux(w, h) {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  FIX #1 — DECOMPRESSION: gzip first, then zlib, then raw
-//  The UIDAI Secure QR uses GZIP (magic: 1f 8b 08 00…)
-//  pako.inflate() fails on gzip → must use pako.ungzip() first
+//  DECOMPRESSION — gzip first, then zlib, then raw
+//  UIDAI Secure QR uses GZIP (magic: 1f 8b).
+//  pako.inflate() fails on gzip → must use pako.ungzip() first.
+//  Also tries skipping 1-4 version prefix bytes.
 // ═════════════════════════════════════════════════════════════
 function decompressBytes(bytes) {
-  // Inner helper: try all decompression methods on a given byte slice
   function tryDecompress(b, label) {
     if (b[0] === 0x1f && b[1] === 0x8b) {
       try {
@@ -457,20 +459,18 @@ function decompressBytes(bytes) {
         return d;
       } catch(e) { dbg('warn', `${label} gzip fail: ${e.message}`); }
     }
-    if (b[0] === 0x78) {  // zlib deflate magic (78 01, 78 9C, 78 DA, 78 5E)
+    if (b[0] === 0x78) {
       try {
         const d = pako.inflate(b);
         dbg('ok', `${label} zlib: ${b.length}→${d.length}B`);
         return d;
       } catch(e) { dbg('warn', `${label} zlib fail: ${e.message}`); }
     }
-    // Try zlib regardless
     try {
       const d = pako.inflate(b);
       dbg('ok', `${label} inflate: ${b.length}→${d.length}B`);
       return d;
     } catch(e) {}
-    // Try raw deflate
     try {
       const d = pako.inflate(b, {raw: true});
       dbg('ok', `${label} raw: ${b.length}→${d.length}B`);
@@ -479,29 +479,22 @@ function decompressBytes(bytes) {
     return null;
   }
 
-  // FIX v3 — VERSION PREFIX BYTE:
-  // Some Aadhaar QR data starts with 1-4 version/format bytes before the
-  // compressed payload (e.g. 0x02 version byte then 0x78 0x9C zlib data).
-  // Try the raw bytes first, then skip 1-4 bytes if that fails.
   let result = tryDecompress(bytes, 'raw');
   if (result) return result;
-
   for (let skip = 1; skip <= 4; skip++) {
     if (bytes.length > skip + 10) {
       result = tryDecompress(bytes.slice(skip), `skip${skip}`);
       if (result) return result;
     }
   }
-
   dbg('warn', 'No decompression worked — using raw bytes');
   return bytes;
 }
 
 // ═════════════════════════════════════════════════════════════
-//  CAMERA SCANNING — FIX #2
-//  Fixed: race condition with detecting flag.
-//  When BarcodeDetector is busy (detecting=true), run jsQR
-//  on the current frame instead of wasting the frame.
+//  CAMERA SCANNING — speed-fixed
+//  BarcodeDetector non-blocking: when detecting=true, run jsQR
+//  on the same frame instead of skipping it.
 // ═════════════════════════════════════════════════════════════
 async function startCam() {
   if (scanning) return;
@@ -546,9 +539,7 @@ async function startCam() {
   }
 }
 
-// FIX #2: tick — BarcodeDetector (non-blocking) || jsQR (synchronous fallback)
-// Key fix: when detecting=true (BarcodeDetector busy), run jsQR on the same frame
-// instead of wasting it. Only one rAF is scheduled per frame.
+// tick: BarcodeDetector (non-blocking) || jsQR fallback on same frame
 function tick() {
   if (!scanning) return;
 
@@ -561,8 +552,6 @@ function tick() {
             detecting = false;
             if (!scanning) return;
             if (results && results.length > 0) {
-              // FIX A: BarcodeDetector.rawValue for binary QR may be byte-string; pass it directly
-              // trySecure Path D will handle it if not XML/numeric
               onCameraHit(results[0].rawValue || '', null);
             } else {
               rafId = requestAnimationFrame(tick);
@@ -571,12 +560,10 @@ function tick() {
           .catch(() => {
             detecting = false;
             if (!scanning) return;
-            // BarcodeDetector failed this frame → try jsQR as backup
             if (jsqrFrame()) return;
             rafId = requestAnimationFrame(tick);
           });
-        // DO NOT call rAF here — .then() will call it
-        return;
+        return; // .then() will schedule next tick
       } else {
         // BarcodeDetector busy — run jsQR on this frame as backup
         if (jsqrFrame()) return;
@@ -590,22 +577,18 @@ function tick() {
   rafId = requestAnimationFrame(tick);
 }
 
-// Fast jsQR: downscale to 640px wide — ~6x faster than full 1080p.
-// Aadhaar QR is large/high-contrast; 640px is sufficient for decode.
+// jsqrFrame: multi-scale passes for fast + reliable decode
+// Pass 1: 960px (speed/quality balance)
+// Pass 2: full resolution every 3rd frame (dense QRs)
+// Pass 3: 1.5x upscale every 8th frame (small/far QRs)
 let _jsqrFrameCount = 0;
 function jsqrFrame() {
   if (!scanning) return false;
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return false;
-
   _jsqrFrameCount++;
 
-  // FIX v3 — FULL-RESOLUTION CAMERA SCAN:
-  // Aadhaar Secure QR is Version 25-40 (dense, up to 177×177 modules).
-  // Downscaling to 640px makes each module only 3-4px → hard to decode.
-  // Strategy: every frame try at 640px, every 3rd frame try at FULL resolution.
-
-  // Pass 1: downscale to 960px (good balance speed/quality)
+  // Pass 1: 960px downscale
   const scale1 = Math.min(1, 960 / vw);
   const sw1 = Math.round(vw * scale1), sh1 = Math.round(vh * scale1);
   if (sc.width !== sw1 || sc.height !== sh1) { sc.width = sw1; sc.height = sh1; }
@@ -617,7 +600,7 @@ function jsqrFrame() {
     try { code = jsQR(imgData1.data, sw1, sh1, {inversionAttempts: 'attemptBoth'}); } catch(e) {}
   }
 
-  // Pass 2: Full video resolution — every 3rd frame (catches very dense QRs)
+  // Pass 2: Full resolution — every 3rd frame
   if (!code && _jsqrFrameCount % 3 === 0) {
     try {
       const c2 = getAux(vw, vh);
@@ -629,7 +612,7 @@ function jsqrFrame() {
     } catch(e) {}
   }
 
-  // Pass 3: 1.5× upscale of Pass 1 — every 8th frame (far/small QRs)
+  // Pass 3: 1.5x upscale — every 8th frame
   if (!code && _jsqrFrameCount % 8 === 0) {
     try {
       const sw3 = Math.min(Math.round(sw1 * 1.5), 1920);
@@ -650,9 +633,8 @@ function jsqrFrame() {
   return false;
 }
 
-// FIX A: Extract raw bytes from jsQR byte-mode chunks
-// jsQR 1.4.0 stores raw bytes in code.chunks[i].bytes for byte-mode QR codes
-// (Aadhaar Secure QR is always byte mode). code.binaryData does NOT exist.
+// Extract raw bytes from jsQR byte-mode chunks
+// jsQR 1.4.0 stores raw bytes in code.chunks[i].bytes
 function extractChunkBytes(code) {
   try {
     if (code && code.chunks && code.chunks.length > 0) {
@@ -754,7 +736,6 @@ async function scanImage(img, file, url) {
         if (a.method === 'jsqr') {
           code = jsQR(id.data, sw, sh, {inversionAttempts: 'dontInvert'});
           if (!code) code = jsQR(id.data, sw, sh, {inversionAttempts: 'attemptBoth'});
-          // FIX A: attach raw chunk bytes so parseQR can use them
           if (code) code._rawBytes = extractChunkBytes(code);
         } else if (a.method === 'zxing') {
           code = await tryZXingAsync(sc);
@@ -844,25 +825,25 @@ function parseQR(raw, binary) {
   dbg('inf', `QR: ${s.length} chars | bin: ${binary ? binary.length : 0}B`);
   dbg('inf', `Preview: "${s.slice(0, 80)}"`);
   if (tryXML(s)) return;
+
   if (/^\d+$/.test(s) && s.length > 20) {
     dbg('ok', `Numeric: ${s.length} digits`);
     const bytes = bigToBytes(s);
     if (bytes) {
       dbg('inf', `Bytes: ${bytes.length}B. First 8: ${h8(bytes)}`);
-      const dec = decompressBytes(bytes);   // FIX #1
+      const dec = decompressBytes(bytes);
       if (trySecure(dec, 'B')) return;
     }
   }
+
   if (binary && binary.length > 20) {
     const arr = binary instanceof Uint8Array ? binary : new Uint8Array(binary);
     dbg('inf', `Binary: ${arr.length}B. First 8: ${h8(arr)}`);
-    const dec = decompressBytes(arr);       // FIX #1
+    const dec = decompressBytes(arr);
     if (trySecure(dec, 'C')) return;
   }
-  // Path D: raw string treated as binary bytes
-  // Handles Aadhaar Secure QR where jsQR/BarcodeDetector returns binary data as a JS string.
-  // For byte-mode QR, code.data chars have codes 0-255 matching original bytes.
-  // This is the primary path for binary Aadhaar QRs when no binary param was provided.
+
+  // Path D: raw string as binary bytes (for binary QR where jsQR returns string)
   if (!binary && raw && raw.length > 50) {
     try {
       const rawBytes = new Uint8Array(raw.length);
@@ -920,7 +901,7 @@ function bigToBytes(numStr) {
   } catch(e) { dbg('err', 'BigInt: ' + e.message); return null; }
 }
 
-// ─── Format B/C: UIDAI Secure QR ─────────────────────────────
+// ─── Format B/C/D: UIDAI Secure QR ───────────────────────────
 function trySecure(bytes, tag) {
   try {
     const dec  = new TextDecoder('iso-8859-1');
@@ -947,23 +928,19 @@ function trySecure(bytes, tag) {
       dbg('err', `[${tag}] bad name: "${name}"`); return false;
     }
     dbg('ok', `[${tag}] ✓ name="${name}" dob="${dob}" gender="${gender}"`);
-    // FIX v3 — INDICATOR BINARY BYTE (ROOT CAUSE of mobile verification failure):
-    // UIDAI stores the indicator as a RAW BINARY BYTE (0x00, 0x01, 0x02, 0x03),
-    // NOT as an ASCII digit character ('0', '1', '2', '3').
-    // parseInt('\x02') === NaN  →  NaN || 0  → indicator always 0  → no hashes
-    // Fix: read segs[0][0] directly (the raw byte value before ISO-8859-1 decode).
+
+    // INDICATOR FIX: UIDAI stores indicator as RAW BINARY BYTE (0x00–0x03),
+    // NOT as ASCII digit. parseInt(ISO-decoded '\x02') === NaN → always 0.
+    // Fix: read segs[0][0] directly as the raw byte value.
     const indRaw = segs[0].length > 0 ? segs[0][0] : 0;
-    const indicator = (indRaw >= 0 && indRaw <= 3)  ? indRaw          // binary byte 0-3
-                    : (indRaw >= 48 && indRaw <= 51) ? (indRaw - 48)  // ASCII '0'-'3'
-                    : (parseInt(ind) || 0);                             // fallback
-    // FIX B — INDICATOR AMBIGUITY:
-    // The UIDAI spec has a direct contradiction between sections:
-    //   Section 2.2: indicator=1 → email only, indicator=2 → mobile only
-    //   Section 3.2 (validation): indicator=1 → mobile only, indicator=2 → email only
-    // Resolution: when indicator=1 or 2 (single hash in QR), store it in BOTH
-    // gMobileHash AND gEmailHash so the user can verify whichever they have.
-    // For indicator=3 (both) the positions are unambiguous.
+    const indicator = (indRaw >= 0 && indRaw <= 3)   ? indRaw          // binary 0-3
+                    : (indRaw >= 48 && indRaw <= 51)  ? (indRaw - 48)  // ASCII '0'-'3'
+                    : (parseInt(ind) || 0);                              // fallback
     dbg('inf', `indicator raw=0x${indRaw.toString(16)} → ${indicator}`);
+
+    // INDICATOR AMBIGUITY: UIDAI spec sections 2.2 and 3.2 contradict each other
+    // (ind=1: email vs mobile). When ind=1 or 2 (single hash), store in BOTH slots
+    // so user can verify whichever they have.
     let pos = 0;
     for (let i = 0; i <= 15; i++) { pos += segs[i].length; if (i < 15) pos++; }
     const photoStart = pos + 1;
@@ -973,7 +950,6 @@ function trySecure(bytes, tag) {
       : '';
     let mobileHex = '', emailHex = '', photoEnd = sigStart;
     if (indicator === 3) {
-      // Both present: spec says mobile is closer to signature, email is next
       const mStart = sigStart - 32;
       const eStart = sigStart - 64;
       mobileHex = toHex32(mStart);
@@ -982,7 +958,6 @@ function trySecure(bytes, tag) {
       dbg('inf', `Mobile hash (ind=3): ${mobileHex.slice(0,16)}…`);
       dbg('inf', `Email hash  (ind=3): ${emailHex.slice(0,16)}…`);
     } else if (indicator === 1 || indicator === 2) {
-      // Single hash — spec contradicts itself; store in BOTH so user can verify either
       const hStart = sigStart - 32;
       const single = toHex32(hStart);
       mobileHex = single;
@@ -990,7 +965,7 @@ function trySecure(bytes, tag) {
       photoEnd  = hStart;
       dbg('inf', `Single hash (ind=${indicator}, both slots): ${single.slice(0,16)}…`);
     }
-    // indicator===0: no hashes; photoEnd stays at sigStart
+
     let photoBytes = null;
     if (photoStart < photoEnd && photoEnd - photoStart > 50) {
       photoBytes = bytes.slice(photoStart, photoEnd);
@@ -1057,7 +1032,7 @@ function render(f, rawDisp, fmt) {
   document.getElementById('uid4').textContent =
     (f.uid || '').replace(/\D/g, '').slice(-4) || '—';
   document.getElementById('uidTs').textContent = f.tsStr || '';
-  // FIX B: Updated indicator labels to reflect spec ambiguity
+
   const indMap = {
     0: 'No contact hash in QR',
     1: 'Hash in QR (mobile or email — spec ambiguous)',
@@ -1092,23 +1067,20 @@ function render(f, rawDisp, fmt) {
   setRV(document.getElementById('fState'),  f.state);
   setRV(document.getElementById('fPin'),    f.pc);
 
-  // FIX B: show mobile/email sections based on hash presence, not just indicator
-  // (indicator=1 or 2 is ambiguous per spec, so we show both when single hash present)
-
-  // Reset verified section
+  // Reset verified contact section
   document.getElementById('verifiedMobSec').style.display = 'none';
   document.getElementById('verifiedEmailRow').style.display = 'none';
   document.getElementById('verifiedMobNum').textContent = '';
   document.getElementById('verifiedEmailAddr').textContent = '';
 
+  // Show verification inputs when hash is present (indicator ambiguity: show both for ind=1,2)
   const vMob = document.getElementById('vMobile');
   const vEm  = document.getElementById('vEmail');
   if (gMobileHash) {
     vMob.style.display = '';
     const ambig = gIndicator === 1 || gIndicator === 2;
     document.getElementById('mHashDisp').textContent =
-      (ambig ? '⚠ Ambiguous hash (mobile or email) — try both below
-Hash: ' : 'Stored mobile hash: ') + gMobileHash;
+      (ambig ? '⚠ Ambiguous hash (mobile or email — spec ambiguous)\nHash: ' : 'Stored mobile hash: ') + gMobileHash;
     document.getElementById('mVerRes').className = 'vresult';
     document.getElementById('mobileIn').value = '';
   } else vMob.style.display = 'none';
@@ -1116,8 +1088,7 @@ Hash: ' : 'Stored mobile hash: ') + gMobileHash;
   if (gEmailHash) {
     vEm.style.display = '';
     document.getElementById('eHashDisp').textContent =
-      (gIndicator === 1 || gIndicator === 2 ? '⚠ Same hash (try email or mobile above)
-Hash: ' : 'Stored email hash: ') + gEmailHash;
+      (gIndicator === 1 || gIndicator === 2 ? '⚠ Same hash (try email or mobile above)\nHash: ' : 'Stored email hash: ') + gEmailHash;
     document.getElementById('eVerRes').className = 'vresult';
     document.getElementById('emailIn').value = '';
   } else vEm.style.display = 'none';
@@ -1298,19 +1269,14 @@ function openPhotoModal() {
 function closeModal() { document.getElementById('photoModal').classList.remove('show'); }
 
 // ═════════════════════════════════════════════════════════════
-//  MOBILE / EMAIL HASH VERIFICATION — FIX #4 + #5
+//  MOBILE / EMAIL HASH VERIFICATION
 //
-//  FIX #4: Works now because decompression (FIX #1) correctly
-//  reads indicator=2 or 3, so gMobileHash is populated.
-//
-//  Algorithm (per UIDAI spec + Python script analysis):
-//  - N = last digit of full Aadhaar UID = refId[3]
-//  - hash = SHA-256^N(mobileNumber as UTF-8 string)
-//  - Exhaustive fallback: try all iterations 1-9
-//  - Also try with country code prefixes (+91, 91, 0091)
-//
-//  FIX #5: After successful verification, display the verified
-//  mobile/email number prominently in the result card.
+//  From v3 "wrong code" — this is the correct implementation:
+//  • Strips +91 / 91 / 0091 prefix from input
+//  • N = last digit of UID (refId[3]), exhaustive fallback 1–9
+//  • Also tries uid4 salt variants (plain+uid4, uid4+plain)
+//  • Also tries reversed hash bytes (older UIDAI encoders)
+//  • On success: showVerifiedContact() displays on result card
 // ═════════════════════════════════════════════════════════════
 async function verifyMobile() {
   const inp    = document.getElementById('mobileIn');
@@ -1318,7 +1284,7 @@ async function verifyMobile() {
   const btn    = document.getElementById('mVerBtn');
   const raw    = inp.value.trim();
 
-  // Normalize: strip leading +91 / 91 / 0091 to get bare 10-digit number
+  // Normalize: strip leading +91 / 91 / 0091
   let mobile = raw.replace(/\s+/g, '');
   if (mobile.startsWith('+91')) mobile = mobile.slice(3);
   else if (mobile.startsWith('0091')) mobile = mobile.slice(4);
@@ -1338,29 +1304,26 @@ async function verifyMobile() {
     const specIter  = lastDigit < 1 ? 1 : lastDigit;
     dbg('inf', `Mobile verify: refId="${gRefId}" specIter=${specIter} mobile="${mobile}"`);
 
-    // Build ordered list: spec iteration first, then all others 1–9
+    // Spec iteration first, then all others 1–9
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
 
-    // Try bare number + all common prefix variants (UIDAI may hash any form)
-    // Also try with last-4 Aadhaar digits appended as salt (commonSegmentDigest pattern)
     const uid4 = gRefId ? gRefId.slice(0, 4) : '';
     const candidates = [
-      {label: 'plain',              value: mobile},
-      {label: '+91 prefix',         value: '+91' + mobile},
-      {label: '91 prefix',          value: '91'  + mobile},
-      {label: '0091 prefix',        value: '0091' + mobile},
+      {label: 'plain',        value: mobile},
+      {label: '+91 prefix',   value: '+91' + mobile},
+      {label: '91 prefix',    value: '91'  + mobile},
+      {label: '0091 prefix',  value: '0091' + mobile},
       ...(uid4 ? [
-        {label: 'plain+uid4',       value: mobile + uid4},
-        {label: 'uid4+plain',       value: uid4 + mobile},
+        {label: 'plain+uid4', value: mobile + uid4},
+        {label: 'uid4+plain', value: uid4 + mobile},
       ] : []),
     ];
 
     for (const cand of candidates) {
       for (const n of toTry) {
         const computed = await sha256n(cand.value, n);
-        const match    = computed.toLowerCase() === gMobileHash.toLowerCase();
-        if (match) {
+        if (computed.toLowerCase() === gMobileHash.toLowerCase()) {
           showVRes(res,
             `✅ Mobile Verified!\n${mobile}\nSHA-256 × ${n}${cand.label !== 'plain' ? ' · hashed as ' + cand.value : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
             true);
@@ -1372,7 +1335,7 @@ async function verifyMobile() {
       }
     }
 
-    // FIX C: also try reversed hash bytes (some older UIDAI QR encoders stored hash in reverse)
+    // Reversed hash fallback (some older UIDAI QR encoders)
     const reverseHex = gMobileHash.match(/.{2}/g).reverse().join('');
     for (const cand of candidates) {
       for (const n of toTry) {
@@ -1386,7 +1349,6 @@ async function verifyMobile() {
       }
     }
 
-    // All failed
     const computed = await sha256n(mobile, specIter);
     showVRes(res,
       `❌ Mobile number does not match.\nComputed (×${specIter}): ${computed.slice(0,16)}…\nExpected:        ${gMobileHash.slice(0,16)}…\n(Tried iters 1–9, +91/91/0091 prefixes, reversed bytes)`,
@@ -1418,17 +1380,15 @@ async function verifyEmail() {
     const specIter  = lastDigit < 1 ? 1 : lastDigit;
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
-    // Also try uppercase variant
+
     const candidates = [email, email.toUpperCase()];
     for (const cand of candidates) {
       for (const n of toTry) {
         const computed = await sha256n(cand, n);
-        const match    = computed.toLowerCase() === gEmailHash.toLowerCase();
-        if (match) {
+        if (computed.toLowerCase() === gEmailHash.toLowerCase()) {
           showVRes(res,
             `✅ Email Verified!\n${email}\nSHA-256 × ${n}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
             true);
-          // FIX #5 — Show verified email on result card
           showVerifiedContact('email', email);
           btn.disabled = false; btn.textContent = 'Verified ✅';
           dbg('ok', `Email verified: iter=${n}`);
@@ -1436,7 +1396,7 @@ async function verifyEmail() {
         }
       }
     }
-    // FIX C: also try reversed hash bytes
+    // Reversed hash fallback
     const reverseHexE = gEmailHash.match(/.{2}/g).reverse().join('');
     let matchedReverse = false;
     for (const cand of candidates) {
@@ -1461,7 +1421,7 @@ async function verifyEmail() {
   btn.disabled = false; btn.textContent = 'Verify';
 }
 
-// FIX #5: Show verified contact info in result card
+// Show verified contact prominently on the result card
 function showVerifiedContact(type, value) {
   const sec = document.getElementById('verifiedMobSec');
   sec.style.display = '';
@@ -1634,13 +1594,7 @@ function hideMsg() {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  FIX #3 — DRAG & DROP
-//  Root causes fixed:
-//  1. File type check relaxed: some OS/browsers set type='' on drag
-//     → now accepts any file, checks extension as fallback
-//  2. e.stopPropagation() on drop to prevent window handler conflict
-//  3. dragenter + dragover both call preventDefault() + set dropEffect
-//  4. dragleave uses relatedTarget to avoid flicker on child elements
+//  DRAG & DROP — via addEventListener (not inline attrs)
 // ═════════════════════════════════════════════════════════════
 (function initDropZone() {
   const dropZ = document.getElementById('dropZ');
@@ -1663,7 +1617,6 @@ function hideMsg() {
 
   dropZ.addEventListener('dragleave', e => {
     e.stopPropagation();
-    // Only remove highlight when truly leaving the zone (not entering a child)
     if (!dropZ.contains(e.relatedTarget)) {
       dropZ.classList.remove('drag');
     }
@@ -1671,25 +1624,21 @@ function hideMsg() {
 
   dropZ.addEventListener('drop', e => {
     e.preventDefault();
-    e.stopPropagation();   // FIX: prevent window handler from firing
+    e.stopPropagation();
     dropZ.classList.remove('drag');
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (!f) return;
-    // FIX: relaxed check — f.type may be '' on some OS/browsers
-    // Accept if type starts with image/ OR if no type but has image extension
     const isImage = f.type.startsWith('image/') ||
       (!f.type && /\.(jpg|jpeg|png|gif|webp|bmp|tiff?|heic|avif)$/i.test(f.name));
     if (isImage) {
       processFile(f);
     } else if (!f.type) {
-      // Unknown type — try to process anyway (let img.onload validate)
-      processFile(f);
+      processFile(f); // unknown type — let img.onload validate
     } else {
       showWarn('Please drop an image file (JPG, PNG, WebP, etc.).');
     }
   });
 
-  // Prevent browser from opening the file if dropped outside the zone
   window.addEventListener('dragover', e => e.preventDefault(), false);
   window.addEventListener('drop',     e => e.preventDefault(), false);
 })();
