@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Aadhaar QR Scanner</title>
+<title>Aadhaar QR Scanner v2</title>
 <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
@@ -227,8 +227,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 <div class="hdr">
   <div class="hdr-ico">🪪</div>
   <div>
-    <h1>Aadhaar QR Scanner</h1>
-    <p>Official UIDAI Spec · Photo · Mobile Verification · Camera + Upload</p>
+    <h1>Aadhaar QR Scanner v2</h1>
+    <p>Official UIDAI Spec · Binary QR fix · Indicator ambiguity fix · v2</p>
   </div>
 </div>
 <div class="pills">
@@ -386,9 +386,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 // ═══════════════════════════════════════════════════════════════
 //  AADHAAR QR SCANNER — Fixed Version
 //
-//  FIXES APPLIED:
+//  FIXES APPLIED (v2 — deep APK + spec analysis):
 //  1. DECOMPRESSION: Try pako.ungzip() FIRST (gzip magic 1f 8b),
-//     then pako.inflate(), then raw — critical for mobile hash
+//     then pako.inflate(), then raw — critical for binary QR data
 //  2. CAMERA: Fixed detecting flag race condition; jsQR fallback
 //     always runs when BarcodeDetector is busy
 //  3. DRAG & DROP: Relaxed file type check (accepts empty type),
@@ -397,6 +397,17 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);min-height
 //     fixed → indicator correctly reads 2 or 3 → hash extracted
 //  5. VERIFIED DISPLAY: After successful verification, mobile/email
 //     number shown prominently on result card
+//  6. QR BINARY PATH (v2): Path D — raw string treated as byte array
+//     This is the PRIMARY fix for binary Aadhaar Secure QR not being
+//     decoded. jsQR returns binary data as code.data string, code.binaryData
+//     doesn't exist → Path C (binary param) was always null → parse failed.
+//     Now: detect binary bytes in raw string, convert to Uint8Array, decompress.
+//  7. jsQR CHUNKS (v2): extractChunkBytes() reads code.chunks[i].bytes
+//     for byte-mode QR — more reliable than code.data string conversion.
+//  8. INDICATOR AMBIGUITY (v2): UIDAI spec sections 2.2 and 3.2 contradict
+//     each other (1=email vs 1=mobile). When single hash (indicator=1 or 2),
+//     both mobile AND email verification sections are shown with the same hash.
+//  9. REVERSED HASH (v2): Also try reversed byte order as fallback in verify.
 // ═══════════════════════════════════════════════════════════════
 
 if (typeof pdfjsLib !== 'undefined') {
@@ -532,6 +543,8 @@ function tick() {
             detecting = false;
             if (!scanning) return;
             if (results && results.length > 0) {
+              // FIX A: BarcodeDetector.rawValue for binary QR may be byte-string; pass it directly
+              // trySecure Path D will handle it if not XML/numeric
               onCameraHit(results[0].rawValue || '', null);
             } else {
               rafId = requestAnimationFrame(tick);
@@ -600,11 +613,30 @@ function jsqrFrame() {
   }
 
   if (code) {
-    onCameraHit(code.data || code.text || '', code.binaryData || null);
+    // FIX A: use jsQR chunk raw bytes (binaryData doesn't exist in jsQR 1.4.0)
+    onCameraHit(code.data || code.text || '', extractChunkBytes(code));
     return true;
   }
   rafId = requestAnimationFrame(tick);
   return false;
+}
+
+// FIX A: Extract raw bytes from jsQR byte-mode chunks
+// jsQR 1.4.0 stores raw bytes in code.chunks[i].bytes for byte-mode QR codes
+// (Aadhaar Secure QR is always byte mode). code.binaryData does NOT exist.
+function extractChunkBytes(code) {
+  try {
+    if (code && code.chunks && code.chunks.length > 0) {
+      const allBytes = [];
+      for (const chunk of code.chunks) {
+        if (chunk.type === 'byte' && Array.isArray(chunk.bytes) && chunk.bytes.length > 0) {
+          for (let j = 0; j < chunk.bytes.length; j++) allBytes.push(chunk.bytes[j]);
+        }
+      }
+      if (allBytes.length > 20) return new Uint8Array(allBytes);
+    }
+  } catch(e) {}
+  return null;
 }
 
 function onCameraHit(raw, binary) {
@@ -693,6 +725,8 @@ async function scanImage(img, file, url) {
         if (a.method === 'jsqr') {
           code = jsQR(id.data, sw, sh, {inversionAttempts: 'dontInvert'});
           if (!code) code = jsQR(id.data, sw, sh, {inversionAttempts: 'attemptBoth'});
+          // FIX A: attach raw chunk bytes so parseQR can use them
+          if (code) code._rawBytes = extractChunkBytes(code);
         } else if (a.method === 'zxing') {
           code = await tryZXingAsync(sc);
         }
@@ -713,7 +747,7 @@ async function scanImage(img, file, url) {
   URL.revokeObjectURL(url);
   if (found) {
     cst.textContent = '✅ Parsing…';
-    parseQR(found.data || found.text || '', found.binaryData || null);
+    parseQR(found.data || found.text || '', found._rawBytes || found.binaryData || null);
   } else {
     fill.style.width = '100%';
     lab.textContent  = '❌ No QR detected';
@@ -796,6 +830,27 @@ function parseQR(raw, binary) {
     const dec = decompressBytes(arr);       // FIX #1
     if (trySecure(dec, 'C')) return;
   }
+  // Path D: raw string treated as binary bytes
+  // Handles Aadhaar Secure QR where jsQR/BarcodeDetector returns binary data as a JS string.
+  // For byte-mode QR, code.data chars have codes 0-255 matching original bytes.
+  // This is the primary path for binary Aadhaar QRs when no binary param was provided.
+  if (!binary && raw && raw.length > 50) {
+    try {
+      const rawBytes = new Uint8Array(raw.length);
+      let hasBinary = false;
+      for (let i = 0; i < raw.length; i++) {
+        const b = raw.charCodeAt(i) & 0xFF;
+        rawBytes[i] = b;
+        if (b > 127 || b < 9) hasBinary = true;
+      }
+      if (hasBinary) {
+        dbg('inf', `Path D: string→bytes (${rawBytes.length}B) first:${Array.from(rawBytes.slice(0,4)).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+        const dec = decompressBytes(rawBytes);
+        if (trySecure(dec, 'D')) return;
+      }
+    } catch(e) { dbg('warn', 'Path D: ' + e.message); }
+  }
+
   if (tryRegex(s)) return;
   dbg('err', 'All formats failed');
   showWarn('QR scanned but Aadhaar format not recognised. Check debug log.');
@@ -863,42 +918,42 @@ function trySecure(bytes, tag) {
       dbg('err', `[${tag}] bad name: "${name}"`); return false;
     }
     dbg('ok', `[${tag}] ✓ name="${name}" dob="${dob}" gender="${gender}"`);
-    // FIX: Handle both ASCII ('0'–'3') and raw binary byte (0x00–0x03) indicator
-    let indicator = 0;
-    if (segs[0].length > 0) {
-      const rawByte = segs[0][0];
-      if (rawByte >= 0x30 && rawByte <= 0x33) {
-        indicator = rawByte - 0x30;       // ASCII '0'–'3'
-      } else if (rawByte <= 3) {
-        indicator = rawByte;              // binary 0–3
-        dbg('warn', `indicator: binary byte ${rawByte}`);
-      } else {
-        indicator = parseInt(ind) || 0;   // last-resort parseInt
-      }
-    } else {
-      indicator = parseInt(ind) || 0;
-    }
-    const emailP    = indicator === 1 || indicator === 3;
-    const mobileP   = indicator === 2 || indicator === 3;
-    dbg('inf', `indicator=${indicator} mobile=${mobileP} email=${emailP}`);
+    const indicator = parseInt(ind) || 0;
+    // FIX B — INDICATOR AMBIGUITY:
+    // The UIDAI spec has a direct contradiction between sections:
+    //   Section 2.2: indicator=1 → email only, indicator=2 → mobile only
+    //   Section 3.2 (validation): indicator=1 → mobile only, indicator=2 → email only
+    // Resolution: when indicator=1 or 2 (single hash in QR), store it in BOTH
+    // gMobileHash AND gEmailHash so the user can verify whichever they have.
+    // For indicator=3 (both) the positions are unambiguous.
+    dbg('inf', `indicator=${indicator}`);
     let pos = 0;
     for (let i = 0; i <= 15; i++) { pos += segs[i].length; if (i < 15) pos++; }
     const photoStart = pos + 1;
     const sigStart   = bytes.length - 256;
-    const mobStart   = mobileP ? sigStart - 32 : null;
-    const emStart    = emailP  ? (mobileP ? sigStart - 64 : sigStart - 32) : null;
-    const photoEnd   = emStart !== null ? emStart : (mobStart !== null ? mobStart : sigStart);
-    let mobileHex = '', emailHex = '';
-    if (mobStart !== null && mobStart >= 0) {
-      mobileHex = Array.from(bytes.slice(mobStart, mobStart + 32))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-      dbg('inf', `Mobile hash: ${mobileHex.slice(0, 16)}…`);
+    const toHex32 = (start) => start >= 0
+      ? Array.from(bytes.slice(start, start + 32)).map(b => b.toString(16).padStart(2,'0')).join('')
+      : '';
+    let mobileHex = '', emailHex = '', photoEnd = sigStart;
+    if (indicator === 3) {
+      // Both present: spec says mobile is closer to signature, email is next
+      const mStart = sigStart - 32;
+      const eStart = sigStart - 64;
+      mobileHex = toHex32(mStart);
+      emailHex  = toHex32(eStart);
+      photoEnd  = eStart;
+      dbg('inf', `Mobile hash (ind=3): ${mobileHex.slice(0,16)}…`);
+      dbg('inf', `Email hash  (ind=3): ${emailHex.slice(0,16)}…`);
+    } else if (indicator === 1 || indicator === 2) {
+      // Single hash — spec contradicts itself; store in BOTH so user can verify either
+      const hStart = sigStart - 32;
+      const single = toHex32(hStart);
+      mobileHex = single;
+      emailHex  = single;
+      photoEnd  = hStart;
+      dbg('inf', `Single hash (ind=${indicator}, both slots): ${single.slice(0,16)}…`);
     }
-    if (emStart !== null && emStart >= 0) {
-      emailHex = Array.from(bytes.slice(emStart, emStart + 32))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-      dbg('inf', `Email hash: ${emailHex.slice(0, 16)}…`);
-    }
+    // indicator===0: no hashes; photoEnd stays at sigStart
     let photoBytes = null;
     if (photoStart < photoEnd && photoEnd - photoStart > 50) {
       photoBytes = bytes.slice(photoStart, photoEnd);
@@ -965,7 +1020,13 @@ function render(f, rawDisp, fmt) {
   document.getElementById('uid4').textContent =
     (f.uid || '').replace(/\D/g, '').slice(-4) || '—';
   document.getElementById('uidTs').textContent = f.tsStr || '';
-  const indMap = {0:'No mobile/email in QR', 1:'Email only in QR', 2:'Mobile only in QR', 3:'Mobile + Email in QR'};
+  // FIX B: Updated indicator labels to reflect spec ambiguity
+  const indMap = {
+    0: 'No contact hash in QR',
+    1: 'Hash in QR (mobile or email — spec ambiguous)',
+    2: 'Hash in QR (email or mobile — spec ambiguous)',
+    3: 'Mobile + Email in QR'
+  };
   const indEl = document.getElementById('uidInd');
   if (f.indicator !== undefined) {
     indEl.textContent = indMap[f.indicator] || '';
@@ -994,8 +1055,8 @@ function render(f, rawDisp, fmt) {
   setRV(document.getElementById('fState'),  f.state);
   setRV(document.getElementById('fPin'),    f.pc);
 
-  const emailP  = gIndicator === 1 || gIndicator === 3;
-  const mobileP = gIndicator === 2 || gIndicator === 3;
+  // FIX B: show mobile/email sections based on hash presence, not just indicator
+  // (indicator=1 or 2 is ambiguous per spec, so we show both when single hash present)
 
   // Reset verified section
   document.getElementById('verifiedMobSec').style.display = 'none';
@@ -1005,16 +1066,21 @@ function render(f, rawDisp, fmt) {
 
   const vMob = document.getElementById('vMobile');
   const vEm  = document.getElementById('vEmail');
-  if (mobileP && gMobileHash) {
+  if (gMobileHash) {
     vMob.style.display = '';
-    document.getElementById('mHashDisp').textContent = 'Stored hash: ' + gMobileHash;
+    const ambig = gIndicator === 1 || gIndicator === 2;
+    document.getElementById('mHashDisp').textContent =
+      (ambig ? '⚠ Ambiguous hash (mobile or email) — try both below
+Hash: ' : 'Stored mobile hash: ') + gMobileHash;
     document.getElementById('mVerRes').className = 'vresult';
     document.getElementById('mobileIn').value = '';
   } else vMob.style.display = 'none';
 
-  if (emailP && gEmailHash) {
+  if (gEmailHash) {
     vEm.style.display = '';
-    document.getElementById('eHashDisp').textContent = 'Stored hash: ' + gEmailHash;
+    document.getElementById('eHashDisp').textContent =
+      (gIndicator === 1 || gIndicator === 2 ? '⚠ Same hash (try email or mobile above)
+Hash: ' : 'Stored email hash: ') + gEmailHash;
     document.getElementById('eVerRes').className = 'vresult';
     document.getElementById('emailIn').value = '';
   } else vEm.style.display = 'none';
@@ -1223,32 +1289,23 @@ async function verifyMobile() {
 
   if (!/^\d{10}$/.test(mobile)) {
     inp.classList.add('error');
-    showVRes(res, '❌ Enter a valid 10-digit mobile number (or with +91/91 prefix)', false);
+    showVRes(res, '❌ Enter a valid 10-digit mobile (or with +91/91 prefix)', false);
     return;
   }
   inp.classList.remove('error');
-  if (!gMobileHash) { showVRes(res, '❌ No mobile hash found in QR data', false); return; }
+  if (!gMobileHash) { showVRes(res, '❌ No mobile hash found in QR', false); return; }
 
   btn.disabled = true; btn.textContent = 'Verifying…';
   try {
-    // FIX: Derive iteration count from last digit of Aadhaar (4th char of refId)
-    // Spec: digit 0 or 1 → apply SHA-256 once; digit 2–9 → apply that many times
-    const lastDigitChar = gRefId && gRefId.length >= 4 ? gRefId.charAt(3) : '1';
-    const lastDigit     = parseInt(lastDigitChar);
-    const specIter      = (!isNaN(lastDigit) && lastDigit >= 1) ? lastDigit : 1;
-    dbg('inf', `Mobile verify: refId="${gRefId}" lastDigit="${lastDigitChar}" specIter=${specIter} mobile="${mobile}"`);
+    const lastDigit = gRefId && gRefId.length >= 4 ? (parseInt(gRefId.charAt(3)) || 1) : 1;
+    const specIter  = lastDigit < 1 ? 1 : lastDigit;
+    dbg('inf', `Mobile verify: refId="${gRefId}" specIter=${specIter} mobile="${mobile}"`);
 
     // Build ordered list: spec iteration first, then all others 1–9
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
 
-    // FIX: Also try reversed byte order of stored hash (spec says "in reverse order"
-    // which is ambiguous — some QR tools store the hash bytes LSB-first)
-    const mHashFwd = gMobileHash.toLowerCase();
-    const mHashRev = (gMobileHash.match(/.{2}/g) || []).reverse().join('').toLowerCase();
-    const hashTargets = mHashFwd !== mHashRev ? [mHashFwd, mHashRev] : [mHashFwd];
-
-    // Try bare number + all common prefix variants (UIDAI may hash with country code)
+    // Try bare number + all common prefix variants (UIDAI may hash any form)
     const candidates = [
       {label: 'plain',       value: mobile},
       {label: '+91 prefix',  value: '+91' + mobile},
@@ -1259,30 +1316,41 @@ async function verifyMobile() {
     for (const cand of candidates) {
       for (const n of toTry) {
         const computed = await sha256n(cand.value, n);
-        for (const target of hashTargets) {
-          if (computed === target) {
-            const byteOrderNote = target === mHashRev && mHashFwd !== mHashRev ? ' (reversed byte order)' : '';
-            showVRes(res,
-              `✅ Mobile Verified!\n${mobile}\nSHA-256 × ${n}${cand.label !== 'plain' ? ' · hashed as ' + cand.value : ''}${byteOrderNote}${n !== specIter ? ' (fallback iter)' : ' (per spec)'}`,
-              true);
-            showVerifiedContact('mobile', mobile);
-            btn.disabled = false; btn.textContent = 'Verified ✅';
-            dbg('ok', `Mobile verified: iter=${n} candidate="${cand.value}"${byteOrderNote}`);
-            return;
-          }
+        const match    = computed.toLowerCase() === gMobileHash.toLowerCase();
+        if (match) {
+          showVRes(res,
+            `✅ Mobile Verified!\n${mobile}\nSHA-256 × ${n}${cand.label !== 'plain' ? ' · hashed as ' + cand.value : ''}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
+            true);
+          showVerifiedContact('mobile', mobile);
+          btn.disabled = false; btn.textContent = 'Verified ✅';
+          dbg('ok', `Mobile verified: iter=${n} candidate="${cand.value}"`);
+          return;
         }
       }
     }
 
-    // All failed — show diagnostic info
+    // FIX C: also try reversed hash bytes (some older UIDAI QR encoders stored hash in reverse)
+    const reverseHex = gMobileHash.match(/.{2}/g).reverse().join('');
+    for (const cand of candidates) {
+      for (const n of toTry) {
+        const computed = await sha256n(cand.value, n);
+        if (computed.toLowerCase() === reverseHex.toLowerCase()) {
+          showVRes(res, `✅ Mobile Verified (reversed hash)!\n${mobile}\nSHA-256 × ${n}`, true);
+          showVerifiedContact('mobile', mobile);
+          btn.disabled = false; btn.textContent = 'Verified ✅';
+          return;
+        }
+      }
+    }
+
+    // All failed
     const computed = await sha256n(mobile, specIter);
     showVRes(res,
-      `❌ Mobile number does not match.\nComputed (×${specIter}): ${computed.slice(0,16)}…\nStored (forward): ${mHashFwd.slice(0,16)}…\nStored (reversed): ${mHashRev.slice(0,16)}…\n(Tried iterations 1–9, +91/91/0091 prefixes, and both hash byte orders)`,
+      `❌ Mobile number does not match.\nComputed (×${specIter}): ${computed.slice(0,16)}…\nExpected:        ${gMobileHash.slice(0,16)}…\n(Tried iters 1–9, +91/91/0091 prefixes, reversed bytes)`,
       false);
-    dbg('warn', `Mobile not matched: "${mobile}" specIter=${specIter} hashFwd=${mHashFwd.slice(0,8)} hashRev=${mHashRev.slice(0,8)}`);
+    dbg('warn', `Mobile not matched: ${mobile}`);
   } catch(e) {
     showVRes(res, '❌ Verification error: ' + e.message, false);
-    dbg('err', 'verifyMobile: ' + e.message);
   }
   btn.disabled = false; btn.textContent = 'Verify';
 }
@@ -1299,46 +1367,53 @@ async function verifyEmail() {
     return;
   }
   inp.classList.remove('error');
-  if (!gEmailHash) { showVRes(res, '❌ No email hash found in QR data', false); return; }
+  if (!gEmailHash) { showVRes(res, '❌ No email hash found in QR', false); return; }
 
   btn.disabled = true; btn.textContent = 'Verifying…';
   try {
-    // FIX: Derive iteration count from last digit of Aadhaar (4th char of refId)
-    const lastDigitChar = gRefId && gRefId.length >= 4 ? gRefId.charAt(3) : '1';
-    const lastDigit     = parseInt(lastDigitChar);
-    const specIter      = (!isNaN(lastDigit) && lastDigit >= 1) ? lastDigit : 1;
+    const lastDigit = gRefId && gRefId.length >= 4 ? (parseInt(gRefId.charAt(3)) || 1) : 1;
+    const specIter  = lastDigit < 1 ? 1 : lastDigit;
     const toTry = [specIter];
     for (let i = 1; i <= 9; i++) { if (i !== specIter) toTry.push(i); }
-
-    // FIX: Also try reversed byte order of stored email hash
-    const eHashFwd = gEmailHash.toLowerCase();
-    const eHashRev = (gEmailHash.match(/.{2}/g) || []).reverse().join('').toLowerCase();
-    const hashTargets = eHashFwd !== eHashRev ? [eHashFwd, eHashRev] : [eHashFwd];
-
-    // Try lowercase and uppercase variants
+    // Also try uppercase variant
     const candidates = [email, email.toUpperCase()];
     for (const cand of candidates) {
       for (const n of toTry) {
         const computed = await sha256n(cand, n);
-        for (const target of hashTargets) {
-          if (computed === target) {
-            const byteOrderNote = target === eHashRev && eHashFwd !== eHashRev ? ' (reversed byte order)' : '';
-            showVRes(res,
-              `✅ Email Verified!\n${email}\nSHA-256 × ${n}${byteOrderNote}${n !== specIter ? ' (fallback iter)' : ' (per spec)'}`,
-              true);
-            showVerifiedContact('email', email);
-            btn.disabled = false; btn.textContent = 'Verified ✅';
-            dbg('ok', `Email verified: iter=${n}${byteOrderNote}`);
-            return;
-          }
+        const match    = computed.toLowerCase() === gEmailHash.toLowerCase();
+        if (match) {
+          showVRes(res,
+            `✅ Email Verified!\n${email}\nSHA-256 × ${n}${n !== specIter ? ' (fallback)' : ' (per spec)'}`,
+            true);
+          // FIX #5 — Show verified email on result card
+          showVerifiedContact('email', email);
+          btn.disabled = false; btn.textContent = 'Verified ✅';
+          dbg('ok', `Email verified: iter=${n}`);
+          return;
         }
       }
     }
-    showVRes(res, '❌ Email address does not match stored hash.\n(Tried iterations 1–9, both byte orders, none matched)', false);
-    dbg('warn', `Email not matched: "${email}" specIter=${specIter} hashFwd=${eHashFwd.slice(0,8)}`);
+    // FIX C: also try reversed hash bytes
+    const reverseHexE = gEmailHash.match(/.{2}/g).reverse().join('');
+    let matchedReverse = false;
+    for (const cand of candidates) {
+      for (const n of toTry) {
+        const computed = await sha256n(cand, n);
+        if (computed.toLowerCase() === reverseHexE.toLowerCase()) {
+          showVRes(res, `✅ Email Verified (reversed hash)!\n${email}\nSHA-256 × ${n}`, true);
+          showVerifiedContact('email', email);
+          btn.disabled = false; btn.textContent = 'Verified ✅';
+          matchedReverse = true; break;
+        }
+      }
+      if (matchedReverse) break;
+    }
+    if (!matchedReverse) {
+      showVRes(res, '❌ Email address does not match stored hash.\n(Tried iterations 1–9, reversed bytes, none matched)', false);
+      dbg('warn', `Email not matched: ${email}`);
+    }
   } catch(e) {
     showVRes(res, '❌ Error: ' + e.message, false);
-    dbg('err', 'verifyEmail: ' + e.message);
   }
   btn.disabled = false; btn.textContent = 'Verify';
 }
