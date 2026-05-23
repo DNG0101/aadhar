@@ -1352,161 +1352,333 @@ function openPhotoModal() {
 }
 function closeModal() { document.getElementById('photoModal').classList.remove('show'); }
 
-// ═════════════════════════════════════════════════════════════
-//  HASH VERIFICATION (Advanced collapsible panel)
-// ═════════════════════════════════════════════════════════════
-async function verifyMobile() {
-  const inp    = document.getElementById('mobileIn');
-  const res    = document.getElementById('mVerRes');
-  const btn    = document.getElementById('mVerBtn');
-  const mobile = inp.value.trim().replace(/\D/g,'');
-
-  if (!/^\d{10}$/.test(mobile)) {
-    inp.classList.add('error');
-    showVRes(res, '❌ Enter a valid 10-digit mobile number', false); return;
-  }
-  inp.classList.remove('error');
-  if (!gMobileHash) {
-    showVRes(res, 'ℹ️ No hash found in QR — cannot verify.', null); return;
-  }
-
-  btn.disabled = true; btn.textContent = 'Verifying…';
-  const lastDigit = gRefId ? (parseInt(gRefId.charAt(3),10) || 1) : 1;
-  const specIter  = lastDigit < 1 ? 1 : lastDigit;
-  const toTry     = [specIter, ...[1,2,3,4,5,6,7,8,9].filter(i => i !== specIter)];
-
-  const strategies = [
-    {id:'A', fn: n => sha256nRaw(mobile, n)},
-    {id:'B', fn: n => sha256nHex(mobile, n)},
-    {id:'C', fn: n => sha256nRaw('91'+mobile, n)},
-    {id:'D', fn: n => sha256nHex('91'+mobile, n)},
-    {id:'E', fn: n => sha256nRaw('+91'+mobile, n)},
-    {id:'F', fn: _ => sha256nRaw(gUidLast4+mobile, 1)},
-    {id:'G', fn: n => sha256nRaw(gUidLast4+mobile, n)},
-  ];
-
-  try {
-    for (const n of toTry) {
-      for (const s of strategies) {
-        const h = await s.fn(n);
-        if (h.toLowerCase() === gMobileHash.toLowerCase()) {
-          showVRes(res,
-            `✅ Mobile verified!\nStrategy ${s.id} · ${n} SHA-256 iteration${n>1?'s':''}`,
-            true);
-          btn.disabled = false; btn.textContent = 'Verify'; return;
-        }
-      }
-    }
-    showVRes(res,
-      `❌ No match after ${toTry.length * strategies.length} attempts.\n` +
-      `Enter the exact mobile number registered with UIDAI.`, false);
-  } catch(e) { showVRes(res, '❌ Error: ' + e.message, false); }
-  btn.disabled = false; btn.textContent = 'Verify';
-}
-  async function attachMobile(){
-
-  const res =
-    document.getElementById('mVerRes');
+async function attachMobile(){
 
   const btn =
     document.getElementById('mAttachBtn');
 
+  const res =
+    document.getElementById('mVerRes');
+
   if(!gMobileHash){
     showVRes(
       res,
-      '❌ No mobile hash in QR',
+      '❌ No mobile hash found in QR',
       false
     );
     return;
   }
 
   btn.disabled = true;
-  btn.textContent = 'Scanning...';
+  btn.textContent = 'Starting...';
 
-  try{
+  let found = false;
+  const workers = [];
+  let totalChecked = 0;
+  let finished = 0;
 
-    const starts = [6,7,8,9];
+  function stopAllWorkers(){
+    workers.forEach(w=>{
+      try{ w.terminate(); }
+      catch(e){}
+    });
+  }
+
+  // worker logic
+  const workerCode = `
+  self.onmessage = async function(e){
+
+    const {
+      start,
+      end,
+      hash,
+      uidLast4,
+      refId
+    } = e.data;
+
+    async function sha256(text){
+      const enc =
+        new TextEncoder()
+        .encode(text);
+
+      const digest =
+        await crypto.subtle.digest(
+          'SHA-256',
+          enc
+        );
+
+      return Array
+      .from(
+        new Uint8Array(digest)
+      )
+      .map(x =>
+        x.toString(16)
+        .padStart(2,'0')
+      )
+      .join('');
+    }
+
+    const lastDigit =
+      refId
+      ? (
+        parseInt(
+          refId.charAt(3),
+          10
+        ) || 1
+      )
+      : 1;
+
+    const specIter =
+      Math.max(1,lastDigit);
+
+    const iterations = [
+      specIter,
+      ...[1,2,3,4,5,6,7,8,9]
+      .filter(x =>
+        x !== specIter
+      )
+    ];
+
     let checked = 0;
-    const chunk = 300;
 
-    for(const s of starts){
+    for(
+      let num=start;
+      num<=end;
+      num++
+    ){
 
-      const start =
-        parseInt(s + '000000000');
+      const mobile =
+        String(num);
 
-      const end =
-        parseInt(s + '999999999');
+      const attempts = [
+        mobile,
+        '91'+mobile,
+        '+91'+mobile,
+        uidLast4+mobile
+      ];
 
-      for(let num=start; num<=end; num++){
+      for(const val of attempts){
 
-        const mobile = String(num);
+        for(const n of iterations){
 
-        const hash =
-          await sha256nRaw(mobile,1);
+          let current = val;
 
-        checked++;
+          for(let i=0;i<n;i++){
+            current =
+              await sha256(
+                current
+              );
+          }
 
-        if(
-          hash.toLowerCase() ===
-          gMobileHash.toLowerCase()
-        ){
+          if(
+            current.toLowerCase()
+            === hash.toLowerCase()
+          ){
 
-          document.getElementById(
-            'cMobileVal'
-          ).textContent = mobile;
+            self.postMessage({
+              found:true,
+              mobile
+            });
 
-          document.getElementById(
-            'cMobileBadge'
-          ).innerHTML = `
-          <span class="contact-badge badge-actual">
-            ✓ Attached & Verified
-          </span>`;
-
-          showVRes(
-            res,
-            `✅ Match Found: ${mobile}`,
-            true
-          );
-
-          btn.disabled = false;
-          btn.textContent = 'Attach';
-
-          return;
+            return;
+          }
         }
+      }
 
-        if(checked % chunk === 0){
-          btn.textContent =
-            `Scanning ${checked.toLocaleString()}`;
+      checked++;
 
-          await new Promise(r =>
-            setTimeout(r,0)
-          );
-        }
+      if(
+        checked % 2000 === 0
+      ){
+        self.postMessage({
+          progress:2000
+        });
       }
     }
 
-    showVRes(
-      res,
-      '❌ No match found',
-      false
+    self.postMessage({
+      done:true
+    });
+  };
+  `;
+
+  const blob =
+    new Blob(
+      [workerCode],
+      {
+        type:
+        'application/javascript'
+      }
     );
 
-  }catch(e){
+  const workerURL =
+    URL.createObjectURL(blob);
 
-    console.error(e);
+  // 60,61,62,63...99
+  const ranges = [];
 
-    showVRes(
-      res,
-      '❌ ' + e.message,
-      false
-    );
+  for(
+    let prefix = 60;
+    prefix <= 99;
+    prefix++
+  ){
 
+    ranges.push([
+      parseInt(
+        prefix +
+        '00000000'
+      ),
+
+      parseInt(
+        prefix +
+        '99999999'
+      )
+    ]);
   }
 
-  btn.disabled = false;
-  btn.textContent = 'Attach';
+  // CPU safe
+  const maxWorkers =
+    Math.min(
+      navigator
+      .hardwareConcurrency || 8,
+      12
+    );
+
+  let currentIndex = 0;
+
+  function runWorker(){
+
+    if(
+      currentIndex
+      >= ranges.length
+    ) return;
+
+    const r =
+      ranges[
+        currentIndex++
+      ];
+
+    const worker =
+      new Worker(workerURL);
+
+    workers.push(worker);
+
+    worker.postMessage({
+      start:r[0],
+      end:r[1],
+      hash:gMobileHash,
+      uidLast4:gUidLast4,
+      refId:gRefId
+    });
+
+    worker.onmessage =
+    function(ev){
+
+      const d =
+        ev.data;
+
+      if(d.progress){
+
+        totalChecked +=
+          d.progress;
+
+        btn.textContent =
+          'Scanning '
+          + totalChecked
+          .toLocaleString();
+      }
+
+      // MATCH FOUND
+      if(
+        d.found &&
+        !found
+      ){
+
+        found = true;
+
+        stopAllWorkers();
+
+        const mobile =
+          d.mobile;
+
+        const el =
+          document
+          .getElementById(
+            'cMobileVal'
+          );
+
+        el.textContent =
+          mobile;
+
+        el.classList
+          .remove('na');
+
+        el.classList
+          .add('masked');
+
+        document
+        .getElementById(
+          'cMobileBadge'
+        )
+        .innerHTML = \`
+        <span class=
+        "contact-badge badge-actual">
+        ✓ Attached & Verified
+        </span>\`;
+
+        showVRes(
+          res,
+          '✅ Match Found: '
+          + mobile,
+          true
+        );
+
+        btn.disabled =
+          false;
+
+        btn.textContent =
+          'Attach';
+      }
+
+      if(d.done){
+
+        finished++;
+
+        // launch next
+        runWorker();
+
+        if(
+          finished
+          === ranges.length
+          &&
+          !found
+        ){
+
+          showVRes(
+            res,
+            '❌ No match found',
+            false
+          );
+
+          btn.disabled =
+            false;
+
+          btn.textContent =
+            'Attach';
+        }
+      }
+    };
+  }
+
+  // start workers
+  for(
+    let i=0;
+    i<maxWorkers;
+    i++
+  ){
+    runWorker();
+  }
 }
-  
 
 async function verifyEmail() {
   const inp   = document.getElementById('emailIn');
